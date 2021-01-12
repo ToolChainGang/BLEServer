@@ -8,32 +8,23 @@
 ##
 ##  FILE
 ##
-##      GPIOServer
+##      BLEServer
 ##
 ##  DESCRIPTION
 ##
-##      RasPi configuration server
+##      Bluetooth Low Energy (BLE) service
 ##
-##      Accept commands from a web socket and perform that function.
+##      Accept commands from a web socket and perform requested BLE function.
 ##
 ##  USAGE
 ##
-##      GPIOServer [-v]
+##      BLEServer [-v]
 ##
 ##      where:      -v      Verbose: print out things as they happen
 ##
 ##      Available commands:
 ##
 ##      ListCommands        => Array of available commands (this list)
-##      GetGPIOInfo         => Return GPIOInfo struct of info
-##      SetGPIOInfo         => Accept new GPIOInfo struct and change names
-##      ToggleGPIO  GPIO#   => Change the state of one GPIO to opposite state
-##      SetGPIO     GPIO#   => Set    the state of one GPIO to specific value
-##      CycleGPIO   GPIO#   => Turn one GPIO off, wait, then turn ON again
-##      ReadGPIO            => Read all GPIO values (synonym for GetGPIOInfo)
-##
-##      SetUName    GPIO# Name        => Set UName of GPIO
-##      SetUDesc    GPIO# Desc        => Set UDesc of GPIO
 ##
 ##      Examples:
 ##
@@ -46,33 +37,38 @@
 ########################################################################################################################
 ########################################################################################################################
 ##
-##      $GPIOInfo   contains information for user consumption: UName, UDesc, Value, and so on.
+## $BLEInfo   contains information for user consumption.
 ##
-##      $GPIOInfo->{GPIOInfo}->[]
-##          {UName} -> "Keurig",                         # User assigned name
-##          {UDesc} -> "Coffee maker in the kitchen"     # User assigned comment
-##          {HName} -> "Relay 1"                         # Hardware name
-##          {Mode}  -> [ 'Input', 'Output' ],
-##          {Value} -> [    'On',    'Off' ],            # Current value
-##          {ID}                                         # (unused by web page)
+## $BLEInfo                                            # Data supplied by this server
+##     ->{Timeout}                                     # Timeout in seconds for commands (DEFAULT: 10)
+##     ->{Hostname}                                    # System name (from /etc/hostname)
+##     ->{IFaces}                                      # Available BLE interfaces
+##         ->{$IF}                                     # Interface to scan     (ex: "hci0")
+##             ->{IFace  }                             # Name of interface   (same as hash key)
+##             ->{Address}                             # Address of interface
+##             ->{Running}                             # TRUE if up and running
+##             ->{Devs}                                # Scanned devices
+##                 ->{$Dev}                            # BLE device ID                 (ex: "84:2E:14:87:66:97")
+##                     ->{ID}                          # Device ID                     (same as hash key)
+##                     ->{Name}                        # Name of device                (ex: "Jovan Heart Monitor")
+##                     ->{Names}[]                     # Array of names returned in scan
+##                     ->{Services}                    # Services available
+##                         ->{$UUID}                   # UUID of service               (ex: "00001801-0000-1000-8000-00805f9b34fb")
+##                             ->{UUID}                # Service UUID                  (same as hash key)
+##                             ->{Service}             # First 8 hex digits of UUID    (ex: "00001801")
+##                             ->{HDStart}             # Start of characteristics
+##                             ->{HDEnd}               # End   of characteristics
+##                             ->{Chars}               # List of available characteristics
+##                                 ->{$Char}           # Handle for this char          (ex: "0002")
+##                                     ->{Handle}      # Handle                        (same as hash key)
+##                                     ->{VHandle}     # Handle for value
+##                                     ->{Properties}  # R/W, etc
+##                                     ->{UUID}        # Full UUID of characteristic   (ex: "00001801-0000-1000-8000-00805f9b34fb")
+##                                     ->{Service}     # First 8 digits of char UUID   (ex: "00001801")
 ##
-##      $GPIOConfig contains full information about the GPIO, including the opened device, mode, 
-##                    logic, and so on.
-##
-##      $GPIOConfig->{GPIO}             # GPIO number, ie "5"
-##          {UName}  -> "Keurig",                         # User assigned name
-##          {UDesc}  -> "Coffee maker in the kitchen"     # User assigned comment
-##          {HName}  -> "Relay 1"                         # Hardware name
-##          { Mode}  -> [  "Input", "Output" ],
-##          {Logic}  -> [ "Normal", "Invert" ],
-##          { Boot}  -> [    "Off",     "On" ],
-##          { Pull}  -> [  "None", "Low", "High" ],
-##          {Device} -> (opened GPIO device)
-##
-##      "Value" and "ID" only exist in the Info struct.
-##
-##      The logic will convert keywords to camel case; thus, it is sufficient to
-##        say things like "if $GPIO->{Logic} eq "Invert" and expect an exact match.
+## A device scan can return several names for any device, including the string "(unknown)". The library attempts
+##   to choose the best human-readable name from the list and returns it as "Name", but includes the array "Names"
+##   in case the user wants to use a different one.
 ##
 ########################################################################################################################
 ########################################################################################################################
@@ -103,19 +99,16 @@ use strict;
 use warnings;
 use Carp;
 
-our $VERSION = 'GPIOServer2020-10-20';
-
-use RPi::Pin;
-use RPi::Const qw(:all);
+our $VERSION = 'BLEServer2020-10-20';
 
 use JSON;
 use Data::Dumper;
-use File::Slurp qw(read_file);
 
-use lib "$ENV{HOME}/GPIOServer/lib";
+use lib "$ENV{HOME}/BLEServer/lib";
 
 use Site::Process;
 use Site::WSServer;
+use Site::BLEInfo;
 use Site::ParseData;
 use Site::RasPiUtils;
 
@@ -127,50 +120,18 @@ use Site::RasPiUtils;
 ########################################################################################################################
 ########################################################################################################################
 
-our $SERVER_PORT = 2021;
+our $SERVER_PORT     = 2021;
 
-our $CycleDefaultMS = 6000;     # 6 seconds wait when power cycling
+our $DEFAULT_TIMEOUT = 10;      # Timeout when waiting for any command
 
-our $SysName;
-our $GPIOConfig;        # Full description of GPIO block
-our $GPIOInfo;          # Info given to web page
+our $BLEInfo;                   # Info given to web page
 
 our $NoError = "No error.";
-
-#  #
-#  # Comment
-#  #
-#  AllowRename yes             # Allow user to change UName and UDesc
-#
-#  GPIO    7
-#      Mode=Input              # One of:   Input   Output
-#      Logic=Invert            #           Invert  Normal
-#      Pull=High               #           High    Low
-#      Boot=Low                # Value to take at bootup
-#      HName="Relay 1"         # Hardware name
-#      UName="Keurig"          # User's   assigned name
-#      UDesc="Coffee maker in the kitchen"
-#
-our $RenameKey = "AllowRename";
-
-our $GPIOConfigFile = "$ENV{HOME}/GPIOServer/etc/GPIO.conf";
-our $GPIOMatches = [
-    {                     RegEx  => qr/^\s*#/                   ,Action => Site::ParseData::SkipLine    }, # Skip Comments
-    { Name => $RenameKey, RegEx  => qr/^\s*AllowRename\s*(\w+)/ ,Action => Site::ParseData::AddGlobal   },
-    {                     RegEx  => qr/^\s*GPIO\s*(\d+)/i       ,Action => Site::ParseData::StartSection},
-    { Name => "Mode"    , RegEx => qr/^\s*Mode\s*=\s*(\w+)/i    ,Action => Site::ParseData::AddVar      },
-    { Name => "Logic"   , RegEx => qr/^\s*Logic\s*=\s*(\w+)/i   ,Action => Site::ParseData::AddVar      },
-    { Name => "Pull"    , RegEx => qr/^\s*Pull\s*=\s*(\w+)/i    ,Action => Site::ParseData::AddVar      },
-    { Name => "Boot"    , RegEx => qr/^\s*Boot\s*=\s*(\w+)/i    ,Action => Site::ParseData::AddVar      },
-    { Name => "HName"   , RegEx => qr/^\s*HName\s*=\s*(".*")/i  ,Action => Site::ParseData::AddQVar     },
-    { Name => "UName"   , RegEx => qr/^\s*UName\s*=\s*(".*")/i  ,Action => Site::ParseData::AddQVar     },
-    { Name => "UDesc"   , RegEx => qr/^\s*UDesc\s*=\s*(".*")/i  ,Action => Site::ParseData::AddQVar     },
-    ];
 
 ########################################################################################################################
 ########################################################################################################################
 ##
-## GPIO server
+## BLE server
 ##
 ########################################################################################################################
 ########################################################################################################################
@@ -185,11 +146,11 @@ my $Verbose = 0;
 $Verbose = 1
     if defined $ARGV[0] and $ARGV[0] eq "-v";
 
-GetGPIOConfig();
-$SysName    = GetHostname();
-$GPIOInfo   = GetGPIOInfo();
+$BLEInfo = { Timeout  => $DEFAULT_TIMEOUT,
+             Hostname => GetHostname,
+             IFaces   => GetBLEIFaces() };
 
-# print Data::Dumper->Dump([$GPIOInfo],["GPIOInfo"]);
+# print Data::Dumper->Dump([$BLEInfo],["BLEInfo"]);
 # exit(0);
 
 ########################################################################################################################
@@ -197,10 +158,10 @@ $GPIOInfo   = GetGPIOInfo();
 #
 # Setup a web socket and listen for connections.
 #
-Message("**** GPIOServer: GPIOServer is up and running.")
+Message("**** BLEServer: BLEServer is up and running.")
     if $Verbose;
 
-Message("**** GPIOServer: Waiting for websocket connection")
+Message("**** BLEServer: Waiting for websocket connection")
     if $Verbose;
 
 Site::WSServer::InitWSServer($SERVER_PORT,[],\&WebRequest,\&ConnectionRequest)->start;
@@ -234,12 +195,12 @@ sub ConnectionRequest {
 #
 # Inputs:      Error message to send
 #
-# Outputs:     None. Connected clients are sent a new GPIOInfo struct
+# Outputs:     None. Connected clients are sent a new BLEInfo struct
 #
 sub UpdateClients {
 
     my $Server  = GetServer();
-    my $Request = { Type => "GetGPIOInfo", State => $GPIOInfo, Error => $NoError };
+    my $Request = { Type => "GetBLEInfo", State => $BLEInfo, Error => $NoError };
 
     SendResponse($_,$Request)
         for $Server->connections();
@@ -249,17 +210,17 @@ sub UpdateClients {
 ########################################################################################################################
 ########################################################################################################################
 #
-# PinChange - Handle pin change notifications
+# Data - Handle data notifications
 #
 # Inputs:      None.
 #
-# Outputs:     None. Connected clients are sent a new GPIOInfo struct
+# Outputs:     None. Connected clients are sent a new BLEInfo struct
 #
-sub PinChange {
+sub Data {
 
-    Message("**** GPIOServer: PinChange!");
+    Message("**** BLEServer: Data!");
 
-    GetGPIOValues();        # Will update all clients
+    GetBLEValues();
     UpdateClients();
     }
 
@@ -286,130 +247,61 @@ sub WebRequest {
     #
     # Lots of error checking for web requests.
     #
-    return Message("**** GPIOServer: No Web request")
+    return Message("**** BLEServer: No Web request")
         unless length $JSONText;
 
     my $Request = eval{decode_json $JSONText};              # Catches/avoids Croak() in lib function
 
-    return Message("**** GPIOServer: Bad JSON Web request: ($JSONText)")
+    return Message("**** BLEServer: Bad JSON Web request: ($JSONText)")
         unless defined $Request && (ref $Request) eq "HASH";
 
 # print Data::Dumper->Dump([$Request],["Request"]);
 
     $Request->{Type} //= "";
         
-    return Message("**** GPIOServer: No request type: ($JSONText)")
+    return Message("**** BLEServer: No request type: ($JSONText)")
         unless length $Request->{Type};
 
     #
-    # ListCommands - Return list of available server commands
+    # GetBLEInfo - Return the BLE information
     #
-    if( $Request->{Type} eq "ListCommands" ) {
-        $Request->{Error} = $NoError;
-        Message("**** GPIOServer: ListCommands()")
+    if( $Request->{Type} eq "GetBLEInfo" ) {
+        Message("**** BLEServer: GetBLEInfo()")
             if $Verbose;
-        $Request->{State} = [ "ListCommands", 
-                              "GetGPIOInfo",  
-                              "SetGPIOInfo",
-                              "ToggleGPIO",
-                              "SetGPIO",
-                              "CycleGPIO",
-                              "ReadGPIO" ];
-        SendResponse($Conn,$Request);
-        return;
-        }
-
-    #
-    # GetGPIOInfo - Return the GPIO information
-    #
-    if( $Request->{Type} eq "GetGPIOInfo" or
-        $Request->{Type} eq "ReadGPIO"  ) {
         $Request->{Error} = $NoError;
-        Message("**** GPIOServer: GetGPIOInfo()")
-            if $Verbose;
         #
-        # Getting values and returning $GPIOInfo is the default (see below)
+        # Returning $BLEInfo is the default (see below)
         #
         }
 
     #
-    # SetGPIOInfo - Implement new GPIO user name and comment
+    # GetDevs - Scan for devices seen by interface
     #
-    elsif( $Request->{Type} eq "SetGPIOInfo" ) {
-        $Request->{Error} = $NoError;
-        Message("**** GPIOServer: SetGPIOInfo()")
-            if $Verbose;
-        $Request->{Error} = SetGPIOInfo($Request->{Arg1},$GPIOInfo,$Verbose);
-        $GPIOInfo = GetGPIOInfo();
-        }
+    elsif( $Request->{Type} eq "GetDevs" ) {
+        my $IFace = $Request->{Arg1};
 
-    #
-    # ToggleGPIO - Change value of GPIO output
-    #
-    elsif( $Request->{Type} eq "ToggleGPIO" ) {
-        Message("**** GPIOServer: ToggleGPIO($Request->{Arg1})")
-            if $Verbose;
-        $Request->{Error} = ToggleGPIO($Request->{Arg1});
-        }
-
-    #
-    # SetGPIO - Set value of GPIO output to specified arg
-    #
-    elsif( $Request->{Type} eq "SetGPIO" ) {
-        Message("**** GPIOServer: SetGPIO($Request->{Arg1},$Request->{Arg2})")
-            if $Verbose;
-        $Request->{Error} = SetGPIO($Request->{Arg1},$Request->{Arg2});
-        }
-
-    #
-    # CycleGPIO - Power cycle (Off, then On) a GPIO
-    #
-    elsif( $Request->{Type} eq "CycleGPIO" ) {
-        Message("**** GPIOServer: CycleGPIO($Request->{Arg1},$Request->{Arg2})")
-            if $Verbose;
-        $Request->{Error} = $NoError;
-        my $CycleMS = $Request->{Arg2} // $CycleDefaultMS;
-        $Request->{Error} = SetGPIO($Request->{Arg1},"Off");
-        if( $Request->{Error} eq $NoError ) {
-            sleep $CycleMS/1000.0;
-            $Request->{Error} = SetGPIO($Request->{Arg1},"On");
-            }
-        }
-
-    #
-    # SetUName - Set UName of GPIO to specified arg
-    #
-    elsif( $Request->{Type} eq "SetUName" ) {
-        Message("**** GPIOServer: SetUName($Request->{Arg1},$Request->{Arg2})")
+        Message("**** BLEServer: GetDevs($IFace)")
             if $Verbose;
 
-        $Request->{Error} = SetUName($Request->{Arg1},$Request->{Arg2},$Verbose);
-        }
+        $Request->{Error} = ValidAccess($IFace);
 
-    #
-    # SetUDesc - Set UDesc of GPIO to specified arg
-    #
-    elsif( $Request->{Type} eq "SetUDesc" ) {
-        Message("**** GPIOServer: SetUDesc($Request->{Arg1},$Request->{Arg2})")
-            if $Verbose;
-
-        $Request->{Error} = SetUDesc($Request->{Arg1},$Request->{Arg2},$Verbose);
+        $BLEInfo->{IFaces}{$IFace}{Devs} = GetBLEDevs($IFace,$BLEInfo->{Timeout})
+            if $Request->{Error} eq $NoError;
         }
 
     #
     # Unknown request type: Return error to caller
     #
     else {
-        Message("**** GPIOServer: ConfigServer: Unknown request type ($Request->{Type})")
+        Message("**** BLEServer: ConfigServer: Unknown request type ($Request->{Type})")
             if $Verbose;
-        $Request->{Error} = "**** GPIOServer: ConfigServer: Unknown request type ($Request->{Type})";
+        $Request->{Error} = "**** BLEServer: ConfigServer: Unknown request type ($Request->{Type})";
         }
 
     #
     # Pack up the error message and return the struct to the caller
     #
-    GetGPIOValues();
-    $Request->{State} = $GPIOInfo;
+    $Request->{State} = $BLEInfo;
     SendResponse($Conn,$Request);
     }
 
@@ -417,183 +309,58 @@ sub WebRequest {
 ########################################################################################################################
 ########################################################################################################################
 #
-# GetGPIOConfig - Set up a local config struct with all the GPIO information.
+# ValidAccess - Validate BLEInfo member access args
 #
-# Inputs:      None.
+# Inputs:   IFace
+#           Dev
+#           Service
+#           Char
 #
-# Outputs:     None. Global $GPIOConfig is filled
+# Outputs:  Error message, if defective access
+#           $NoError if access OK
 #
-sub GetGPIOConfig {
+# NOTE: Only the arguments supplied are checked; IOW, this function can be used to check
+#         1 .. N arguments of the subset below in order.
+#
+sub ValidAccess {
+
+    my $IFace = shift;
+
+    return "No interface supplied"
+        unless defined $IFace;
+
+    return "No such interface ($IFace)"
+        unless defined $BLEInfo->{IFaces}{$IFace};
 
     ####################################################################################################################
-    #
-    # GPIO information, from config file
-    #
-    return { Valid => 0 }
-        unless -r $GPIOConfigFile;
 
-    my $ConfigFile = Site::ParseData->new(Filename => $GPIOConfigFile, Matches  => $GPIOMatches);
-    $GPIOConfig = $ConfigFile->ParseFile();
+    my $Dev = shift;
 
-    $GPIOConfig->{$RenameKey} = MatchArgs($GPIOConfig->{$RenameKey}, [ "Yes", "No" ],"Global",$RenameKey);
-    $GPIOConfig->{Valid} = $ConfigFile->{Parsed};
+    return $NoError
+        unless defined $Dev;
 
-    foreach my $GPIOID (keys %{$GPIOConfig}) {
+    return "No such device ($IFace::$Dev)"
+        unless defined $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev};
 
-        next
-            if $GPIOID eq "Valid" or $GPIOID eq $RenameKey;
+    ####################################################################################################################
 
-        ################################################################################################################
-        #
-        # Do some conversions and simple error checking on the GPIO input file
-        #
-        # GPIO    3
-        #     Mode=Output
-        #     Logic=Normal
-        #     Pull=High
-        #     Boot=Off
-        #     HName="Relay U3"
-        #     UName="Relay U3"
-        #     UDesc=""
-        #
-        exit Message("**** GPIOServer: GPIO ID ($GPIOID) is not valid number")
-            unless $GPIOID =~ /^\d+$/;
+    my $Service = shift;
 
-        exit Message("**** GPIOServer: GPIO ID ($GPIOID) is out of range")
-            unless $GPIOID >= 0 and $GPIOID <= 31;
+    return $NoError
+        unless defined $Service;
 
-        my $GPIO = $GPIOConfig->{$GPIOID};
+    return "No such Service ($IFace::$Dev/$Service)"
+        unless defined $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev}{Services}{$Service};
 
-        $GPIO->{ Mode} = MatchArgs($GPIO->{ Mode},[  "Input", "Output" ],$GPIOID, "Mode");
-        $GPIO->{Logic} = MatchArgs($GPIO->{Logic},[ "Normal", "Invert" ],$GPIOID,"Logic");
-        $GPIO->{ Boot} = MatchArgs($GPIO->{ Boot},[    "Off",     "On" ],$GPIOID, "Boot");
+    ####################################################################################################################
 
-        #
-        # Pull takes "High", "Low", or "None". Devault (1st arg) is "None".
-        #
-        $GPIO->{Pull} = MatchArgs($GPIO->{Pull},[  "None", "Low", "High" ],$GPIOID, "Pull")
-            if $GPIO->{Mode} eq "Input";
+    my $Char = shift;
 
-        $GPIO->{HName} = "GPIO$GPIOID"
-            unless defined $GPIO->{HName} and length $GPIO->{HName};
+    return $NoError
+        unless defined $Char;
 
-        $GPIO->{UName} = "GPIO$GPIOID"
-            unless defined $GPIO->{UName} and length $GPIO->{UName};
-
-        $GPIO->{UDesc} = "---"
-            unless defined $GPIO->{UDesc} and length $GPIO->{UDesc};
-
-        ################################################################################################################
-        #
-        # Connect to the GPIO in question and get the current value
-        #
-        my $Device = RPi::Pin->new($GPIOID);
-        $GPIO->{Device} = $Device;
-
-        if( $GPIO->{Mode} eq "Input" ) { 
-            $Device->mode(INPUT); 
-
-            if(    $GPIO->{Pull} eq "High" ) { $Device->pull(PUD_UP)  ; }
-            elsif( $GPIO->{Pull} eq "Low"  ) { $Device->pull(PUD_DOWN); }
-            else                             { $Device->pull(PUD_OFF) ; }
-
-            $Device->set_interrupt(EDGE_BOTH,'main::PinChange');
-            }
-        else                           { 
-            #
-            # Avoid pathological spike that can happen if we set the mode
-            #   before setting the output value.
-            #
-            SetGPIO($GPIOID,$GPIO->{Boot});
-            $Device->mode(OUTPUT); 
-            SetGPIO($GPIOID,$GPIO->{Boot});
-            }
-        }
-    }
-
-
-########################################################################################################################
-########################################################################################################################
-#
-# GetGPIOInfo - Get an abbreviated struct for the Web interface
-#
-# Inputs:      None.
-#
-# Outputs:     GPIOInfo struct
-#
-sub GetGPIOInfo {
-
-    my $GPIOInfo = { $RenameKey => $GPIOConfig->{$RenameKey} // "Yes", GPIOInfo => [] };
-
-    foreach my $GPIOID (keys %{$GPIOConfig}) {
-
-        next
-            if $GPIOID eq "Valid" or $GPIOID eq $RenameKey;
-
-        my $GPIO = $GPIOConfig->{$GPIOID};
-
-        push @{$GPIOInfo->{GPIOInfo}},{ UName  => $GPIO->{ UName}, 
-                                        UDesc  => $GPIO->{ UDesc}, 
-                                        HName  => $GPIO->{ HName}, 
-                                        Mode   => $GPIO->{  Mode},
-                                        ID     => $GPIOID };
-        }
-
-    $GPIOInfo->{SysName} = $SysName;
-
-    $GPIOInfo->{GPIOInfo} = [ sort { $a->{ID} <=> $b->{ID} } @{$GPIOInfo->{GPIOInfo}} ];
-
-    return $GPIOInfo;
-    }
-
-
-########################################################################################################################
-########################################################################################################################
-#
-# GetGPIOValues - Read current values for all GPIOs
-#
-# Inputs:      None.
-#
-# Outputs:     None. Values are set in place at $GPIOInfo->{GPIOInfo}
-#
-sub GetGPIOValues {
-
-    #
-    # Run through the existing GPIO list, getting current values
-    #
-    foreach my $GPIO (@{$GPIOInfo->{GPIOInfo}}) {
-        my $Value = $GPIOConfig->{$GPIO->{ID}}->{Device}->read();
-
-        $Value = 1 - $Value
-            if $GPIOConfig->{$GPIO->{ID}}->{Logic} eq "Invert";
-
-        $GPIO->{Value} = $Value ? "On" : "Off";
-        }
-    }
-
-
-########################################################################################################################
-########################################################################################################################
-#
-# ToggleGPIO - Toggle value of GPIO
-#
-# Inputs:      ID of GPIO to toggle
-#
-# Outputs:     Error msg, or $NoError
-#
-sub ToggleGPIO {
-    my $GPIOID = shift;
-
-    my $GPIO = $GPIOConfig->{$GPIOID};
-
-    if( $GPIO->{Mode} ne "Output" ) {
-        Message("**** GPIOServer: Not an output device ($GPIOID)")
-            if $Verbose;
-        return "Not an output device ($GPIOID)";
-        }
-
-    my $Value = $GPIO->{Device}->read();
-    $GPIO->{Device}->write(1 - $Value);
+    return "No such Characteristic ($IFace::$Dev/$Service/$Char)"
+        unless defined $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev}{Services}{$Service}{Chars}{$Char};
 
     return $NoError;
     }
@@ -602,218 +369,22 @@ sub ToggleGPIO {
 ########################################################################################################################
 ########################################################################################################################
 #
-# SetGPIO - Set value of GPIO
+# ReqError - Set error and return response
 #
-# Inputs:       ID of GPIO to toggle
-#               New Value to set
+# Inputs:   Connection  - Connection to client
+#           Request     - Request from client
+#           Message     - Error message to return
 #
-# Outputs:      Error msg, or $NoError
+# Outputs:  None.
 #
-# IMPORTANT: "On" and "Off" mean different things depending on the "Logic" setting, "High", "Low", and other
-#              explicit settings do not. If you set the output "High" the output is high, if you set the output
-#              "On", the output might be high or low, depending on the logic.
-#
-sub SetGPIO {
-    my $GPIOID  = shift;
-    my $Setting = shift;
+sub ReqError {
+    my $Conn    = shift;
+    my $Request = shift;
+    my $Message = shift;
 
-    my $GPIO = $GPIOConfig->{$GPIOID};
+    Message($Message);
 
-    unless( defined($GPIO) ) {
-        Message("**** GPIOServer: Server does not control GPIO ($GPIOID)")
-            if $Verbose;
-        return "Server does not control GPIO ($GPIOID)";
-        }
-
-    if( $GPIO->{Mode} ne "Output" ) {
-        Message("**** GPIOServer: Not an output device ($GPIOID)")
-            if $Verbose;
-        return "Not an output device ($GPIOID)";
-        }
-
-    my $Value = -1;
-
-    $Value = 1
-        if lc($Setting) eq "high" or lc($Setting) eq "1";
-
-    $Value = 0
-        if lc($Setting) eq "low"  or lc($Setting) eq "0";
-
-    if( lc($Setting) eq "on" ) {
-        $Value = $GPIO->{Logic} eq "Normal" ? 1 : 0;
-        }
-
-    if( lc($Setting) eq "off" ) {
-        $Value = $GPIO->{Logic} eq "Invert" ? 1 : 0;
-        }
-
-    if( $Value == -1 ) {
-        Message("**** GPIOServer: Unrecognized set value ($GPIOID,$Setting)")
-            if $Verbose;
-        return "Unrecognized set value ($GPIOID,$Setting)";
-        }
-
-    $GPIO->{Device}->write($Value);
-
-    return $NoError;
-    }
-    
-
-########################################################################################################################
-########################################################################################################################
-#
-# SetUName - Set UName of GPIO
-#
-# Inputs:      ID of GPIO to toggle
-#              New UName to use
-#              TRUE if verbose mode
-#
-# Outputs:     Error msg, or $NoError
-#
-sub SetUName {
-    my $GPIOID  = shift;
-    my $UName   = shift;
-    my $Verbose = shift;
-
-    if( $GPIOInfo->{$RenameKey} ne "Yes" ) {
-        Message("**** GPIOServer: Renaming disallowed.")
-            if $Verbose;
-        return "Renaming disallowed";
-        }
-
-    my $GPIO = (grep { $_->{ID} eq $GPIOID } @{$GPIOInfo->{GPIOInfo}})[0];
-
-    unless( defined($GPIO) ) {
-        Message("**** GPIOServer: Server does not control GPIO ($GPIOID)")
-            if $Verbose;
-        return "Server does not control GPIO ($GPIOID)";
-        }
-
-    $GPIO->{UName} = $UName;
-
-    return SetGPIOInfo($GPIOInfo,$Verbose);
-    }
-    
-
-########################################################################################################################
-########################################################################################################################
-#
-# SetUDesc - Set UDesc of GPIO
-#
-# Inputs:      ID of GPIO to toggle
-#              New UDesc to use
-#              TRUE if verbose mode
-#
-# Outputs:     Error msg, or $NoError
-#
-sub SetUDesc {
-    my $GPIOID  = shift;
-    my $UDesc   = shift;
-    my $Verbose = shift;
-
-    if( $GPIOInfo->{$RenameKey} ne "Yes" ) {
-        Message("**** GPIOServer: Renaming disallowed.")
-            if $Verbose;
-        return "Renaming disallowed";
-        }
-
-    my $GPIO = (grep { $_->{ID} eq $GPIOID } @{$GPIOInfo->{GPIOInfo}})[0];
-
-    unless( defined($GPIO) ) {
-        Message("**** GPIOServer: Server does not control GPIO ($GPIOID)")
-            if $Verbose;
-        return "Server does not control GPIO ($GPIOID)";
-        }
-
-    $GPIO->{UDesc} = $UDesc;
-
-    return SetGPIOInfo($GPIOInfo,$Verbose);
-    }
-    
-
-########################################################################################################################
-########################################################################################################################
-#
-# SetGPIOInfo - Set a new GPIO config
-#
-# Inputs:      Requested config state
-#              Original  config state (for comparison)
-#              TRUE if verbose mode
-#
-# Outputs:     Error message
-#
-sub SetGPIOInfo {
-    my $NewInfo = shift;
-    my $Verbose = shift;
-
-    my $GPIOInfo = {};
-
-    foreach my $GPIO (@{$NewInfo->{GPIOInfo}}) {
-        $GPIOInfo->{$GPIO->{ID}}->{UName} = $GPIO->{UName};
-        $GPIOInfo->{$GPIO->{ID}}->{UDesc} = $GPIO->{UDesc};
-        $GPIOConfig->{$GPIO->{ID}}->{UName} = $GPIO->{UName};
-        $GPIOConfig->{$GPIO->{ID}}->{UDesc} = $GPIO->{UDesc};
-        }
-
-# print Data::Dumper->Dump([$GPIOInfo],["GPIOInfo"])
-
-    #
-    # If the original file did not exist, create an empty one.
-    #
-    unless( -w $GPIOConfigFile ) {
-        write_file($GPIOConfigFile,"");
-        }
-
-    unless( -w $GPIOConfigFile ) {
-        Message("**** GPIOServer: Cannot write $GPIOConfigFile")
-            if $Verbose;
-        return "Cannot write $GPIOConfigFile";
-        }
-
-    my $ConfigFile = Site::ParseData->new(Filename => $GPIOConfigFile, Matches  => $GPIOMatches);
-    my $GPIOConfig = $ConfigFile->ParseFile();
-
-    $ConfigFile->FromHash($GPIOInfo);
-    $ConfigFile->Update();
-    $ConfigFile->SaveFile();
-
-# use Data::Dumper;
-# print Data::Dumper->Dump([$ConfigFile->{Lines}],[$ConfigFile->{Filename}]);
-
-    return $NoError;
-    }
-
-
-########################################################################################################################
-########################################################################################################################
-#
-# MatchArgs - Match a GPIO description with one (of two) arguments
-#
-# Inputs:      Argument to match                (ex: "Mode")
-#              Array of possible args to match  (ex: [ "High", "Low" ] )
-#              GPIO ID this arg applies to         (for error message)
-#              Argument name this match applies to (for error message)
-#
-# Outputs:     The canonical argument that matches (ie: "Input" or "Output", matched case insensitive)
-#
-# NOTES: If the $Arg is blank or undefined, the 1st match is given as default.
-#
-sub MatchArgs {
-    my $Arg     = shift;
-    my $Matches = shift;
-    my $GPIOID  = shift;
-    my $ArgName = shift;
-
-    #
-    # If $Arg unspecified, take 1st match as default.
-    #
-    return $Matches->[0]
-        unless defined $Arg and length $Arg;
-
-    foreach my $Match (@{$Matches}) {
-        return $Match
-            if $Arg =~ /$Match/i;
-        }
-
-    exit Message("**** GPIOServer: GPIO ID ($GPIOID) $Arg is not a valid setting for $ArgName.");
+    $Request->{Error} = $Message;
+    $Request->{State} = $BLEInfo;
+    SendResponse($Conn,$Request);
     }

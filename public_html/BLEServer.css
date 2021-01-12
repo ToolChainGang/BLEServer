@@ -1,0 +1,47 @@
+@CHARSET "ISO-8859-1";
+
+* {
+    box-sizing:     border-box;
+    border:         0;                  /* Comment this out for debugging */
+    }
+
+body {
+    background-color:   WhiteSmoke;
+    margin:         0;
+    font-size:      100%;
+    }
+
+/***********************************************************************
+ *
+ * Other pages
+ */
+.PageDiv {
+    width:          100%;
+    max-width:      1024px;
+    display:        none;
+    }
+
+.Hostname {
+    color:          brown;
+    }
+
+.NoBotMargin {
+    margin-bottom:  0;
+    }
+
+.NavButton { 
+    max-height:     60px;
+    border:         2px solid black;
+    border-radius:  15px;
+    -moz-border-radius: 15px;
+    }
+
+input {
+    border-style:   solid;
+    border-width:   1px;
+    border-color:   black;
+    font-family:    helvetica, arial, sans serif;
+    padding-left:   0px;
+    font-size:      150%;
+    color:          brown;
+    }

@@ -121,6 +121,7 @@ use constant AddVar         => 2;
 use constant AddGlobal      => 3;
 use constant SkipLine       => 4;
 use constant AddQVar        => 5;
+use constant PushVar        => 6;
 
 use constant CommentHash    => 1;       # Commented by prepending hash
 use constant CommentSemi    => 2;       # Commented by prepending semicolon
@@ -321,6 +322,11 @@ sub Parse {
                 next;
                 }
 
+            elsif( $Match->{Action} == PushVar ) {
+                push @{$CurrentSection->{Vars}{$Name}},{ Value => $Var1, LineNo => $LineNo, Mode => "Normal" };
+                next;
+                }
+
             #
             # AddQVar - Add quoted var, remove the quotes
             #
@@ -368,7 +374,12 @@ sub AsHash {
             }
 
         foreach my $Var (keys %{$self->{Sections}{$Section}{Vars}}) {
-            $CurrentSection->{$Var} = $self->{Sections}{$Section}{Vars}{$Var}{Value};
+            if( ref $self->{Sections}{$Section}{Vars}{$Var} eq "ARRAY" ) {
+                $CurrentSection->{$Var} = [ map { $_->{Value} } @{$self->{Sections}{$Section}{Vars}{$Var}} ];
+                }
+            else {
+                $CurrentSection->{$Var} = $self->{Sections}{$Section}{Vars}{$Var}{Value};
+                }
             }        
         }
 

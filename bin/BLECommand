@@ -1,0 +1,384 @@
+#!/usr/bin/perl
+#
+########################################################################################################################
+########################################################################################################################
+##
+##      Copyright (C) 2020 Peter Walsh, Milford, NH 03055
+##      All Rights Reserved under the MIT license as outlined below.
+##
+##  FILE
+##
+##      GPIOCommand
+##
+##  DESCRIPTION
+##
+##      Send commands to RasPi GPIO server
+##
+##      Based on command arguments, send commands to the RasPi GPIO server
+##
+##  USAGE
+##
+##      GPIOCommand --host=<Host> --port=<port>  -v Command [Arg1, Arg2, ...]
+##
+##      Where:
+##
+##      <Host>          Is the IP address or host name of the system running the GPIOServer (DEFAULT: localhost)
+##
+##      <Port>          Is the port of the server (DEFAULT: 2021, for GPIOServer)
+##
+##      -v              Verbose, print out GPIO info when command succeeds
+##
+##      Command is one of:
+##
+##          ListCommands            => Return list available commands (this list)
+##          GetGPIOInfo             => Return GPIOInfo struct of info
+##          SetGPIOInfo             => Accept new GPIOInfo struct and change names
+##          ToggleGPIO  GPIO#       => Change the state of one GPIO to opposite state
+##          CycleGPIO   GPIO#       => Turn one GPIO off, wait, then turn ON again
+##          SetGPIO     GPIO# Val   => Set    the state of one GPIO to specific value
+##          ReadGPIO    GPIO#       => Read value of GPIO and print ("On" or "Off")
+##
+##          SetUName    GPIO# Name  => Set UName of GPIO
+##          SetUDesc    GPIO# Desc  => Set UDesc of GPIO
+##
+##      GPIO#       Is the number of the GPIO, in the range 0-31
+##
+##      Val         Is one of [ "On", "Off" ]
+##
+##  EXAMPLES
+##
+##      GPIOCommand 192.168.1.31 ListCommands            # Return list of available commands
+##
+##      GPIOCommand 192.168.1.31 ToggleGPIO 7            # Toggle value of GPIO 7
+##
+##      GPIOCommand 192.168.1.31 SetGPIO    12 Off      # Set GPIO 12 to Off
+##
+##      GPIOCommand 192.168.1.31 SetUName   7 "Keurig"  # Change UName of GPIO7 to "Keurig"
+##
+########################################################################################################################
+########################################################################################################################
+##
+##  MIT LICENSE
+##
+##  Permission is hereby granted, free of charge, to any person obtaining a copy of
+##    this software and associated documentation files (the "Software"), to deal in
+##    the Software without restriction, including without limitation the rights to
+##    use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+##    of the Software, and to permit persons to whom the Software is furnished to do
+##    so, subject to the following conditions:
+##
+##  The above copyright notice and this permission notice shall be included in
+##    all copies or substantial portions of the Software.
+##
+##  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+##    INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+##    PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+##    HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+##    OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+##    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+##
+########################################################################################################################
+########################################################################################################################
+
+use strict;
+use warnings;
+use Carp;
+
+our $VERSION = 'GPIOCommand2020-12-02';
+
+use strict;
+use warnings;
+use Carp;
+
+use Getopt::Long qw(:config no_ignore_case);
+use FindBin      qw($Bin $RealScript);
+use File::Slurp;
+use File::Basename;
+
+use IO::Async::Loop;
+use Net::Async::WebSocket::Client;
+use JSON::PP;
+
+########################################################################################################################
+########################################################################################################################
+##
+## Data declarations
+##
+########################################################################################################################
+########################################################################################################################
+
+my $SERVER_HOST = "127.0.0.1";
+my $SERVER_PORT = 2021;                 # Default for GPIOServer
+
+my $Verbose = 0;
+my $Client;
+my $Loop;
+
+#
+# A request looks like this. The "Type" is mandatory, and must match one of the switch cases below. Any request
+#   can have up to 3 arguments, and can have a result passed back. Error is filled in if there was a problem.
+#
+my $Request = {
+    Type   => undef,
+    Arg1   => undef,
+    Arg2   => undef,
+    Arg3   => undef,
+    Result => undef,
+    Error  => "",
+    };
+
+########################################################################################################################
+########################################################################################################################
+##
+## Connect to the web socket server and send our command and args
+##
+########################################################################################################################
+########################################################################################################################
+
+ParseCommandLine("host=s"        => \$SERVER_HOST,
+                 "port=i"        => \$SERVER_PORT,
+                 "v|verbose"     => \$Verbose);
+
+$Request->{Type} = $ARGV[0];
+$Request->{Arg1} = $ARGV[1];
+$Request->{Arg2} = $ARGV[2];
+$Request->{Arg3} = $ARGV[3];
+
+$Client = Net::Async::WebSocket::Client->new(
+    on_text_frame => sub {
+        my ( $self, $JSONText ) = @_;
+
+        #
+        # Lots of error checking for web requests.
+        #
+        die "**** GPIOServer: No returned frame"
+            unless length $JSONText;
+
+        my $Request = eval{decode_json $JSONText};                 # Catches/avoids Croak() in lib function
+
+        die "**** GPIOServer: Bad JSON returned frame: ($JSONText)"
+            unless defined $Request && (ref $Request) eq "HASH";
+
+# print Data::Dumper->Dump([$Request],["Request"]);
+
+        $Request->{Type} //= "";
+        
+        die "**** GPIOServer: No request type: ($JSONText)"
+            unless length $Request->{Type};
+
+        die $Request->{Error}
+            unless $Request->{Error} eq "No error.";
+
+        if( $Request->{Type} eq "ReadGPIO" ) {
+            my $GPIOID = $Request->{Arg1};
+            my $GPIO = (grep { $_->{ID} eq $GPIOID } @{$Request->{State}{GPIOInfo}})[0];
+            print "$GPIO->{Value}\n"
+                if defined $GPIO->{Value};
+            exit 0;
+            }
+
+        if( $Request->{Type} eq "ListCommands" ) {
+            my $Commands = $Request->{State};
+            print "Available commands: \n";
+            print "    $_\n"
+                foreach @{$Request->{State}};
+            exit 0;
+            }
+
+        if( $Request->{Type} eq "GetGPIOInfo" or $Verbose ) {
+            PrintGPIOInfo($Request->{State}{GPIOInfo});
+            exit 0;
+            }
+
+        exit 0
+            if grep { $Request->{Type} eq $_ } ('SetGPIOInfo',
+                                                'ToggleGPIO',
+                                                'CycleGPIO',
+                                                'SetGPIO',
+                                                'SetUName',
+                                                'SetUDesc');
+
+        print $JSONText;
+        die "**** GPIOServer: Unknown response type: ($Request->{Type})";
+        exit -1;
+        },
+    );
+ 
+$Loop = IO::Async::Loop->new;
+$Loop->add($Client);
+ 
+$Client->connect(url => "ws://$SERVER_HOST:$SERVER_PORT/")     ->
+    then (sub { $Client->send_text_frame(JSONEncode($Request));})->
+    get;
+ 
+$Loop->run;
+ 
+exit(1);
+
+########################################################################################################################
+########################################################################################################################
+##
+## JSONEncode - Encode struct as JSON text
+##
+## Inputs:      Struct to send
+##
+## Outputs:     None.
+##
+sub JSONEncode {
+    my $Response = shift;
+
+    my $JSONText = eval{JSON::PP->new->pretty->encode($Response)};          # Catches/avoids Croak() in lib function
+
+    LogCrit("Bad JSON encode request: ($Response->{Type})")
+        unless defined $JSONText && length $JSONText;
+
+    return $JSONText;
+    }
+
+
+########################################################################################################################
+########################################################################################################################
+##
+## PrintGPIOInfo - Print out GPIO info struct
+##
+## Inputs:      Struct to print
+##
+## Outputs:     None.
+##
+sub PrintGPIOInfo {
+    my $GPIOInfo = shift;
+
+    foreach my $GPIO (sort { $a->{ID} <=> $b->{ID} } @{$GPIOInfo}) {
+        print "GPIO$GPIO->{ID}:\n";
+        print "    " . sprintf("%5s",$_) . ": $GPIO->{$_}\n"
+            foreach sort keys %{$GPIO};
+        print "\n";
+        }
+    }
+
+
+########################################################################################################################
+########################################################################################################################
+#
+# ParseCommandLine - Parse the program command line, using Getopt::Long
+#
+# Inputs:   [Ref to] %Args var for results
+#           String of Getopt::Long parameters to include
+#
+# Outputs:  None.
+#
+# NOTE:     Prints help message and calls exit() if command args can't be parsed.
+#
+sub ParseCommandLine {
+
+#    print "Args: $_\n"
+#        foreach @ARGV;
+
+    if( defined $_[0] and ref $_[0] eq "HASH" ) {
+        my $Args = shift;
+
+        exit HELP_MESSAGE()
+            unless GetOptions($Args,"h|help","version",@_);
+
+        exit HELP_MESSAGE()
+            if $Args->{h};
+
+        exit VERSION_MESSAGE()
+            if $Args->{v};
+        }
+    else {
+        my $Help = 0;
+        my $Vers = 0;
+
+        exit HELP_MESSAGE()
+            unless GetOptions("h|help" => \$Help,"version" => \$Vers, @_);
+
+        exit HELP_MESSAGE()
+            if $Help;
+
+        exit VERSION_MESSAGE()
+            if $Vers;
+        }
+    }
+
+
+########################################################################################################################
+########################################################################################################################
+#
+# HELP_MESSAGE - Print out help information
+#
+# Inputs:   None.
+#
+# Outputs:  Zero
+#
+sub HELP_MESSAGE {
+
+    #
+    # Print the text in the preamble of the script (at the top of the main file) 
+    #   for the help message.
+    #
+    my @Usage = read_file("$Bin/$RealScript");
+
+    shift @Usage
+        until $Usage[0] =~ /USAGE/;
+
+    shift @Usage;           # Skip USAGE line
+
+    #
+    # Print everything between the "Usage" line and the subsequent "Example" line.
+    #   If no "Example" line is found, terminate at the comment barrier.
+    #
+    print "\n";
+    print "Usage: ";
+    while(1) {
+        my $Line = shift @Usage;
+
+        last
+            if $Line =~ /EXAMPLE/;
+
+        last
+            if $Line =~ /###/;
+
+        $Line =~ s/\#\#//;
+
+        print $Line;
+        }
+
+    return 0;
+    }
+
+
+########################################################################################################################
+########################################################################################################################
+#
+# VERSION_MESSAGE - Print out current module version
+#
+# Inputs:   None.
+#
+# Outputs:  Zero.
+#
+sub VERSION_MESSAGE {
+
+    #
+    # Print the text in the preamble of the script (at the top of the main file) 
+    #   for the help message.
+    #
+    # By rights, the version definition should be the first line that matches
+    #
+    my @VersionLines = grep { $_ =~ /\$VERSION/; } read_file("$Bin/$RealScript");
+
+    my $Version = $VersionLines[0] // "Unknown";
+
+    #
+    # Strip the perl syntax for better looking output
+    #
+    $Version =~ s/.* = //;
+    $Version =~ s/;.*//;
+    $Version =~ s/\'//g;
+    $Version =~ s/\"//g;
+
+    print "\n";
+    print basename($0) . " version $Version\n";
+
+    return 0;
+    }

@@ -1,0 +1,8 @@
+########################################################################################################################
+#
+# If a remote user is logged into the system via ssh, the AppDaemon will not reboot the system
+#   when the application ends (on the assumption that a remote user is debugging the system).
+#
+# Thus, if you need to debug the GPIOServer, it's sufficient to remote login using ssh,
+#   kill the GPIOServer process, and rerun it manually from the command line.
+#

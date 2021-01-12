@@ -4,27 +4,51 @@
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
   <meta name="HandheldFriendly"   content="true" />
   <title>BLE Explorer</title>
-  <link   type="text/css"         href="GPIOServer.css" rel="stylesheet">
-  <script type="text/javascript"  src="GPIOServer.js"></script>
-  <script type="text/javascript">
-    function PageInit() {}
-    </script>
-    </head>
+  <script src="//cdn.webix.com/edge/webix.js" type="text/javascript"></script>
+  <link   rel="stylesheet" href="//cdn.webix.com/edge/webix.css" type="text/css">
+  <link   type="text/css"         href="BLEServer.css" rel="stylesheet">
+  <script type="text/javascript"   src="BLEServer.js"></script>
+  <script type="text/javascript">function PageInit() {}</script>
+  </head>
 
 <body>
 
-<!DOCTYPE html>
-<html>
-<head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-    <title>Quick start with Tree</title>
-    <script src="../codebase/webix.js" type="text/javascript" charset="utf-8"></script>
-    <link rel="stylesheet" href="../codebase/webix.css" type="text/css"
-        charset="utf-8">
-</head>
-<body>
 
+<div id="ConnectingPage" style="display: block;" class="PageDiv">
+    <h1>Connecting...</h1>
+    </div>
 
+<div id="MainPage" class="PageDiv">
+    <table class="TOCColumns" summary="System name">
+        <tr><td style="width: 10%">&nbsp;</td><td><h1 class="NoBotMargin">BLE Control for: <span class="Hostname"></span></h1></td></tr>
+
+        <tr><td style="width: 10%">&nbsp;</td><td><div id="BLETree">&nbsp;</div></td></tr>
+        </table>
+
+    <table id="ConfigButton" class="NavTable">
+        <tr><td>&nbsp;</td></tr>
+        <tr><td><img class="NavButton" src="images/Config.png" title="Config" onclick=GotoPage("ConfigPage") /></td><td><h2>Config</h2></td></tr>
+        </table>
+    </div>
+
+<div id="ConfigPage" class="PageDiv">
+    <table class="TOCColumns" summary="System name">
+        <tr><td style="width: 10%">&nbsp;</td><td><h1>BLE names for: <span class="Hostname"></span></h1></td></tr>
+        <tr><td style="width: 10%"></td><td style="width: 80%">
+        Choose a name and description for your devices:
+        </table>
+
+    <table class="BLETable" summary="BLE Names">
+        <tr><td style="width: 10%"></td><td style="width: 80%">
+        <table id="BLENames">
+            </table>
+        </td></tr></table>
+
+    <table class="NavTable">
+        <tr><td>&nbsp;</td></tr>
+        <tr><td><img class="NavButton" src="images/Back.png" title="Back" onclick=GotoPage("MainPage") /></td><td><h2>Back</h2></td></tr>
+        </table>
+    </div>
 
 </body>
 </html>
