@@ -4,8 +4,6 @@
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
   <meta name="HandheldFriendly"   content="true" />
   <title>BLE Explorer</title>
-  <script src="//cdn.webix.com/edge/webix.js" type="text/javascript"></script>
-  <link   rel="stylesheet" href="//cdn.webix.com/edge/webix.css" type="text/css">
   <link   type="text/css"         href="BLEServer.css" rel="stylesheet">
   <script type="text/javascript"   src="BLEServer.js"></script>
   <script type="text/javascript">function PageInit() {}</script>
@@ -21,8 +19,9 @@
 <div id="MainPage" class="PageDiv">
     <table class="TOCColumns" summary="System name">
         <tr><td style="width: 10%">&nbsp;</td><td><h1 class="NoBotMargin">BLE Control for: <span class="Hostname"></span></h1></td></tr>
+        </table>
 
-        <tr><td style="width: 10%">&nbsp;</td><td><div id="BLETree">&nbsp;</div></td></tr>
+    <table id="IFTable" summary="BLE Interfaces">
         </table>
 
     <table id="ConfigButton" class="NavTable">
@@ -37,12 +36,6 @@
         <tr><td style="width: 10%"></td><td style="width: 80%">
         Choose a name and description for your devices:
         </table>
-
-    <table class="BLETable" summary="BLE Names">
-        <tr><td style="width: 10%"></td><td style="width: 80%">
-        <table id="BLENames">
-            </table>
-        </td></tr></table>
 
     <table class="NavTable">
         <tr><td>&nbsp;</td></tr>

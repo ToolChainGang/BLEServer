@@ -1,11 +1,11 @@
-////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 // BLEServer.js - Javascript for BLEServer pages
 //
 // Copyright (C) 2020 Peter Walsh, Milford, NH 03055
 // All Rights Reserved under the MIT license as outlined below.
 //
-////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 //  MIT LICENSE
 //
@@ -26,9 +26,9 @@
 //    OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 //    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
-////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// $BLEInfo                                            # Data supplied by this server
+// BLEInfo                                             # Data supplied by this server
 //     ->{Timeout}                                     # Timeout in seconds for commands (DEFAULT: 10)
 //     ->{Hostname}                                    # System name (from /etc/hostname)
 //     ->{IFaces}                                      # Available BLE interfaces
@@ -36,17 +36,20 @@
 //             ->{IFace  }                             # Name of interface   (same as hash key)
 //             ->{Address}                             # Address of interface
 //             ->{Running}                             # TRUE if up and running
+//             ->{State}                               # "Open", "Closed", "Scanning"
 //             ->{Devs}                                # Scanned devices
 //                 ->{$Dev}                            # BLE device ID                 (ex: "84:2E:14:87:66:97")
 //                     ->{ID}                          # Device ID                     (same as hash key)
 //                     ->{Name}                        # Name of device                (ex: "Jovan Heart Monitor")
 //                     ->{Names}[]                     # Array of names returned in scan
+//                     ->{State}                       # "Open", "Closed", "Scanning"
 //                     ->{Services}                    # Services available
 //                         ->{$UUID}                   # UUID of service               (ex: "00001801-0000-1000-8000-00805f9b34fb")
 //                             ->{UUID}                # Service UUID                  (same as hash key)
 //                             ->{Service}             # First 8 hex digits of UUID    (ex: "00001801")
 //                             ->{HDStart}             # Start of characteristics
 //                             ->{HDEnd}               # End   of characteristics
+//                             ->{State}               # "Open", "Closed", "Scanning"
 //                             ->{Chars}               # List of available characteristics
 //                                 ->{$Char}           # Handle for this char          (ex: "0002")
 //                                     ->{Handle}      # Handle                        (same as hash key)
@@ -54,8 +57,12 @@
 //                                     ->{Properties}  # R/W, etc
 //                                     ->{UUID}        # Full UUID of characteristic   (ex: "00001801-0000-1000-8000-00805f9b34fb")
 //                                     ->{Service}     # First 8 digits of char UUID   (ex: "00001801")
+//                                     ->{State}       # "Open", "Closed", "Scanning"
 //
+// In what follows: $TYPE  Is the type of the directory (ex: "IF")
+//                  $DIR   Is the name of the directory (ex: "hci0", which is of yupe IF
 //
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
     var ConfigSystem = location.hostname;
@@ -70,6 +77,33 @@
     var BLEInfo;
     var PrevBLEInfo;
     var Populated = 0;      // TRUE if web page tables populated from GPIOInfo
+
+    //
+    // Closed/Open icons
+    //
+    var Triangles = { Open: "▼", Closed: "▶", Scanning: "▼" };
+    var OpenClose = '<span class="Triangle"><a onclick=Toggle$TYPE("$DIR","$OC") >$TRI</a> </span>';
+
+    //
+    // Generic table pattern for directory entries
+    //
+    var DTableHeader = '<table id="$TYPETable" summary="">';
+    var DTableFooter = '</table>';
+    var DTableLine   = '\
+        <tr><td class="LeftIndent">&nbsp;</td>                              \
+            <td>$TRI</td>                                                   \
+            <td><img class="FolderIcon" src="images/Folder.png" /></td>     \
+            <td class="$TYPEName">$DIR</td>                                 \
+            <td></td></tr>';
+
+    //
+    // Contents when dir is in "Scanning" mode
+    //
+    var Scanning = '\
+            <tr><td class="LeftIndent">&nbsp;</td>                          \
+                <td>&nbsp;</td>                                             \
+                <td>&nbsp;</td>                                             \
+                <td >Scanning...</td></tr>';
 
     //
     // On first load, calculate reliable page dimensions and do page-specific initialization
@@ -117,10 +151,10 @@
             // Most messages return a GPIOInfo struct, which updates the shown values
             //
             if( ConfigData["Type"] == "GetBLEInfo" ) {
-                console.log("Msg: "+Event.data);
+//                console.log("Msg: "+Event.data);
 
                 BLEInfo = ConfigData.State;
-//                console.log(GPIOInfo);
+                console.log(BLEInfo);
 
                 HostnameElements = document.getElementsByClassName("Hostname");
                 for (i = 0; i < HostnameElements.length; i++) {
@@ -139,6 +173,7 @@
             };
 
         ConfigSocket.onopen = function(Event) {
+            GotoPage("ConnectingPage");
             ServerCommand("GetBLEInfo");
             }
         };
@@ -159,14 +194,13 @@
 
         document.getElementById(PageName).style.display = "block";
 
-        DisplayBLEInfo();
         };
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
     // PopulateMainPage - Populate the landing page as needed
     //
-    function PopulateMainPage() {}
+    function PopulateMainPage() { DisplayBLEInfo(); }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
@@ -176,30 +210,123 @@
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
+    // Open - Open up a directory
+    //
+    function PopulateConfigPage() {}
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // ToggleIF - Toggle an IF between open/close
+    //
+    function ToggleIF(IF) {
+console.log(BLEInfo.IFaces[IF].State);
+        BLEInfo.IFaces[IF].State = ToggleState(BLEInfo.IFaces[IF].State);
+
+console.log(BLEInfo.IFaces[IF].State);
+
+//        if( typeof BLEInfo.IFaces[IF].State === 'Scanning' )
+//            ServerCommand("ScanDevices",IF);
+        DisplayBLEInfo();
+        }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // ToggleState - Toggle one individual state var
+    //
+    function ToggleState(State) {
+
+        if( typeof State === 'undefined' ) {
+            State = 'Scanning';
+            }
+        else {
+            if     ( State === "Closed"   ) { State = 'Open'  ; }
+            else if( State === "Open"     ) { State = 'Closed'; }
+            else if( State === "Scanning" ) { State = 'Closed'; }
+            }
+
+        return State;
+        }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
     // DisplayBLEInfo - Display the BLE info tree
     //
     function DisplayBLEInfo() {
 
-        var BLETree = document.getElementById("BLETree");
-        console.log(BLETree);
+        var IFTable = document.getElementById("IFTable");                   // Always exists
 
-        var Tree = webix.ui({
-            container:  "BLETree",
-            view:"tree",
-            data: [
-                {id:"root", value:"Cars", open:true, data:[
-                    { id:"1", open:true, value:"Toyota", data:[
-                        { id:"1.1", value:"Avalon" },
-                        { id:"1.2", value:"Corolla" },
-                        { id:"1.3", value:"Camry" }
-                        ]},
-                    { id:"2", open:true, value:"Skoda", data:[
-                        { id:"2.1", value:"Octavia" },
-                        { id:"2.2", value:"Superb" }
-                        ]}
-                    ]}
-                ]
+        Object.keys(BLEInfo.IFaces).forEach(function (IF) { 
+
+            var State = BLEInfo.IFaces[IF].State;
+
+            if( typeof State === 'undefined' )
+                State = "Closed";
+
+            var Triangle = OpenClose.replaceAll("$TYPE","IF")
+                                    .replaceAll("$DIR" ,IF)
+                                    .replaceAll("$OC"  ,State)
+                                    .replaceAll("$TRI" ,Triangles[State]);
+
+            var Data = DTableLine.replaceAll("$TYPE","IF")
+                                 .replaceAll("$DIR" ,IF)
+                                 .replaceAll("$TRI" ,Triangle);
+
+            if( BLEInfo.IFaces[IF].State === 'Scanning' ) Data += Scanning;
+            if( BLEInfo.IFaces[IF].State === 'Open'     ) Data += DevTable(IF);
+
+            IFTable.innerHTML = Data;
+            });        
+        }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // DevTable - Return HTML of Device table for specific interface
+    //
+    // Inputs:  IFace of interest
+    //
+    // Outputs: Stringified HTML code for Dev table of IFace
+    //
+    function DevTable(IF) {
+        var DevTable = DTableHeader;
+
+        Object.keys(BLEInfo.IFaces[IF].Devs).forEach(function (Dev) { 
+
+            if( typeof BLEInfo.IFaces[IF].Devs[Dev].State === 'undefined' )
+                BLEInfo.IFaces[IF].Devs[Dev].State = "Closed";
+
+            var Triangle;
+
+            if( BLEInfo.IFaces[IF].Devs[Dev].State === 'Closed' ) { Triangle = ClosedTriangle; }
+            else                                                  { Triangle = OpenedTriangle; }
+
+            Triangle.replaceAll("$TYPE","Dev")
+                    .replaceAll("$DIR"  ,Dev.ID);
+
+            var Data = DTableLine.replaceAll("$TYPE"   ,"Dev")
+                                 .replaceAll("$TRIANGLE",Triangle)
+                                 .replaceAll("$DIR",Dev);
+
+            if( BLEInfo.IFaces[IF].State === 'Scanning' ) Data += Scanning;
+            if( BLEInfo.IFaces[IF].State === 'Open'     ) Data += ServTable(IF);
+
+            DevTable.innerHTML += Data;
             });
 
-        Tree.add({value:BLEInfo.IFaces[0]}, 0);
+        DevTable += DTableFooter;
+
+        return DevTable;
+        }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // ServTable - Return HTML of Services table for specific interface
+    //
+    // Inputs:  IFace of interest
+    //          Dev   of interest
+    //
+    // Outputs: Stringified HTML code for Services table for device
+    //
+    function DevTable(IF) {
+        var DevTable = DTableHeader;
+
         }

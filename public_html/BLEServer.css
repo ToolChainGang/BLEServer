@@ -11,10 +11,6 @@ body {
     font-size:      100%;
     }
 
-/***********************************************************************
- *
- * Other pages
- */
 .PageDiv {
     width:          100%;
     max-width:      1024px;
@@ -27,6 +23,53 @@ body {
 
 .NoBotMargin {
     margin-bottom:  0;
+    }
+
+/***********************************************************************
+ *
+ * Other pages
+ */
+.LeftIndent {
+    width:          2em;
+    }
+
+.Triangle {
+    height:         1em;
+    vertical-align: 0.25em;
+    color:          grey;
+    }
+
+.Triangle:hover {
+    color:          black;
+    }
+
+.FolderIcon {
+    height:         1em;
+    vertical-align: top;
+    }
+
+.IFTable {
+    }
+
+.IFName {
+    }
+
+.DevTable {
+    }
+
+.DevName {
+    }
+
+.ServTable {
+    }
+
+.ServName {
+    }
+
+.CharTable {
+    }
+
+.CharName {
     }
 
 .NavButton { 
