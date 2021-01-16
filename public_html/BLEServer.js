@@ -79,31 +79,50 @@
     var Populated = 0;      // TRUE if web page tables populated from GPIOInfo
 
     //
-    // Closed/Open icons
+    // Directory list line
     //
-    var Triangles = { Open: "▼", Closed: "▶", Scanning: "▼" };
-    var OpenClose = '<span class="Triangle"><a onclick=Toggle$TYPE("$DIR","$OC") >$TRI</a> </span>';
+    DirLine = '\
+        <input type="checkbox" $OPEN id="$DIRInput" onclick="Toggle$TYPE($PATH)" />   \
+        <label class="tree_label" for="$DIRInput">$DIR</label>';
 
     //
-    // Generic table pattern for directory entries
+    // "Scanning" mode line
     //
-    var DTableHeader = '<table id="$TYPETable" summary="">';
-    var DTableFooter = '</table>';
-    var DTableLine   = '\
-        <tr><td class="LeftIndent">&nbsp;</td>                              \
-            <td>$TRI</td>                                                   \
-            <td><img class="FolderIcon" src="images/Folder.png" /></td>     \
-            <td class="$TYPEName">$DIR</td>                                 \
-            <td></td></tr>';
+    var ScanningLine = '\
+        <ul><li><span class="tree_label">Scanning...</span></li></ul>';
 
-    //
-    // Contents when dir is in "Scanning" mode
-    //
-    var Scanning = '\
-            <tr><td class="LeftIndent">&nbsp;</td>                          \
-                <td>&nbsp;</td>                                             \
-                <td>&nbsp;</td>                                             \
-                <td >Scanning...</td></tr>';
+// <ul class="tree">
+//   <li>
+//     <input type="checkbox" checked="checked" id="c1" />
+//     <label class="tree_label" for="c1">Level 0</label>
+//     <ul>
+//       <li>
+//         <input type="checkbox" checked="checked" id="c2" />
+//         <label for="c2" class="tree_label">Level 1</label>
+//         <ul>
+//           <li><span class="tree_label">Level 2</span></li>
+//           <li><span class="tree_label">Level 2</span></li>
+//         </ul>
+//       </li>
+//       <li>
+//         <input type="checkbox" id="c3" />
+//         <label for="c3" class="tree_label">Looong level 1 <br/>label text <br/>with line-breaks</label>
+//         <ul>
+//           <li><span class="tree_label">Level 2</span></li>
+//           <li>
+//             <input type="checkbox" id="c4" />
+//             <label for="c4" class="tree_label"><span class="tree_custom">Specified tree item view</span></label>
+//             <ul>
+//               <li><span class="tree_label">Level 3</span></li>
+//             </ul>
+//           </li>
+//         </ul>
+//       </li>
+//     </ul>
+//   </li>
+
+
+
 
     //
     // On first load, calculate reliable page dimensions and do page-specific initialization
@@ -140,6 +159,8 @@
         ConfigSocket.onmessage = function(Event) {
             ConfigData = JSON.parse(Event.data);
 
+//                console.log("Msg: "+Event.data);
+
             if( ConfigData["Error"] != "No error." ) {
                 console.log("Error: "+ConfigData["Error"]);
                 console.log("Msg:   "+Event.data);
@@ -151,18 +172,29 @@
             // Most messages return a GPIOInfo struct, which updates the shown values
             //
             if( ConfigData["Type"] == "GetBLEInfo" ) {
-//                console.log("Msg: "+Event.data);
+//                console.log(BLEInfo);
 
                 BLEInfo = ConfigData.State;
-                console.log(BLEInfo);
+                SetStates(BLEInfo);
 
                 HostnameElements = document.getElementsByClassName("Hostname");
                 for (i = 0; i < HostnameElements.length; i++) {
                     HostnameElements[i].innerHTML = BLEInfo.Hostname;
                     };
 
+                DisplayBLEInfo();
                 GotoPage("MainPage");
                 return;
+                }
+
+            if( ConfigData["Type"] == "ScanDevs"     ||
+                ConfigData["Type"] == "ScanServices" ||
+                ConfigData["Type"] == "ScanChars"    ) {
+                console.log("Msg: "+Event.data);
+
+                BLEInfo = ConfigData.State;
+                SetStates(BLEInfo);
+                DisplayBLEInfo();
                 }
 
             //
@@ -216,35 +248,139 @@
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // ToggleIF - Toggle an IF between open/close
+    // SetStates - Set all BLEInfo State vars
     //
-    function ToggleIF(IF) {
-console.log(BLEInfo.IFaces[IF].State);
-        BLEInfo.IFaces[IF].State = ToggleState(BLEInfo.IFaces[IF].State);
+    // Inputs:  BLEInfo to set
+    //
+    // Outputs: None. Dir.State is set in the passed BLEInfo
+    //
+    function SetStates(BLEInfo) {
 
-console.log(BLEInfo.IFaces[IF].State);
+        Object.keys(BLEInfo.IFaces).forEach(function (IF) { 
 
-//        if( typeof BLEInfo.IFaces[IF].State === 'Scanning' )
-//            ServerCommand("ScanDevices",IF);
-        DisplayBLEInfo();
+            if( SetState(BLEInfo.IFaces[IF],
+                         BLEInfo.IFaces[IF].Devs) )
+                return;
+
+            Object.keys(BLEInfo.IFaces[IF].Devs).forEach(function (Dev) { 
+
+                if( SetState(BLEInfo.IFaces[IF].Devs[Dev],
+                             BLEInfo.IFaces[IF].Devs[Dev].Services) )
+                    return;
+
+                Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services).forEach(function (Serv) { 
+
+                    if( SetState(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv],
+                                 BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars) )
+                        return;
+
+                    });
+                });
+            });
+        }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // SetState - Set Dir state to known value
+    //
+    // Inputs:  Directory to set (an IF, Dev, Service, or Char)
+    //          Subdir of directory
+    //
+    // Outputs: 0 if subdir contains entries to be processed
+    //          1 if subdir is undefined (or empty) and recursive processing should be skipped.
+    //
+    function SetState(Dir,Arr) {
+
+        if( typeof Dir.State === 'undefined' )
+            Dir.State = 'Closed';
+
+        if( typeof Arr === 'undefined' )
+            return 1;
+
+        if( Dir.State === 'Scanning' && Object.keys(Arr).length > 0 )
+            Dir.State = "Open";
+
+        return Object.keys(Arr).length == 0;
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
     // ToggleState - Toggle one individual state var
     //
-    function ToggleState(State) {
+    // Inputs:  Directory to toggle (an IF, Dev, Service, or Char)
+    //
+    // Outputs: None. State is changed in place.
+    //
+    function ToggleState(Dir) {
 
-        if( typeof State === 'undefined' ) {
-            State = 'Scanning';
-            }
-        else {
-            if     ( State === "Closed"   ) { State = 'Open'  ; }
-            else if( State === "Open"     ) { State = 'Closed'; }
-            else if( State === "Scanning" ) { State = 'Closed'; }
+        if     ( Dir.State === "Closed"   ) { Dir.State = 'Open'  ; }
+        else if( Dir.State === "Open"     ) { Dir.State = 'Closed'; }
+        else if( Dir.State === "Scanning" ) { Dir.State = 'Closed'; }
+        }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // ToggleIF - Toggle an interface dir
+    //
+    // Inputs:  IF to toggle
+    //
+    // Outputs: None. State is changed in place.
+    //
+    function ToggleIF(IF) {
+
+        ToggleState(BLEInfo.IFaces[IF]);
+
+        if( BLEInfo.IFaces[IF].State === "Open" && typeof BLEInfo.IFaces[IF].Devs == "undefined" ) {
+            BLEInfo.IFaces[IF].State === "Scanning";
+            ServerCommand("ScanDevs",IF);
             }
 
-        return State;
+        DisplayBLEInfo();
+        }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // ToggleDev - Toggle a device listing
+    //
+    // Inputs:  IF  of device
+    //          Dev to toggle
+    //
+    // Outputs: None. State is changed in place.
+    //
+    function ToggleDev(IF,Dev) {
+
+        ToggleState(BLEInfo.IFaces[IF].Devs[Dev]);
+
+        if(        BLEInfo.IFaces[IF].Devs[Dev].State    === "Open"      && 
+            typeof BLEInfo.IFaces[IF].Devs[Dev].Services === "undefined" ) {
+            BLEInfo.IFaces[IF].Devs[Dev].State === "Scanning";
+            ServerCommand("ScanServices",IF,Dev);
+            }
+
+        DisplayBLEInfo();
+        }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // ToggleServ - Toggle a service listing
+    //
+    // Inputs:  IF  of device
+    //          Device
+    //          Service to toggle
+    //
+    // Outputs: None. State is changed in place.
+    //
+    function ToggleServ(IF,Dev,Serv) {
+
+        ToggleState(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv]);
+
+        if(        BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].State === "Open"     && 
+            typeof BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars === "undefined" ) {
+            BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].State === "Scanning";
+            ServerCommand("ScanChars",IF,Dev,Serv);
+            }
+
+        DisplayBLEInfo();
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -253,29 +389,40 @@ console.log(BLEInfo.IFaces[IF].State);
     //
     function DisplayBLEInfo() {
 
-        var IFTable = document.getElementById("IFTable");                   // Always exists
+        var HTML = IFTable();
+
+        document.getElementById("IFTable").innerHTML = HTML;                   // Always exists
+        }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // IFTable - Display the HTML for the IF table
+    //
+    function IFTable() {
+
+        var HTML = "";          // <ul> already exists in the page
 
         Object.keys(BLEInfo.IFaces).forEach(function (IF) { 
 
             var State = BLEInfo.IFaces[IF].State;
 
-            if( typeof State === 'undefined' )
-                State = "Closed";
+            if( State === 'Scanning' &&
+                Object.keys(BLEInfo.IFaces[IF].Devs).length > 0 )
+                State = "Open";
 
-            var Triangle = OpenClose.replaceAll("$TYPE","IF")
-                                    .replaceAll("$DIR" ,IF)
-                                    .replaceAll("$OC"  ,State)
-                                    .replaceAll("$TRI" ,Triangles[State]);
+            HTML += '<li>';
+            HTML += DirLine.replaceAll("$TYPE","IF")
+                           .replaceAll("$DIR" ,IF)
+                           .replaceAll("$PATH","'" + IF + "'")
+                           .replaceAll("$OPEN",State === "Scanning" || State === "Open" ? "checked" : "");
 
-            var Data = DTableLine.replaceAll("$TYPE","IF")
-                                 .replaceAll("$DIR" ,IF)
-                                 .replaceAll("$TRI" ,Triangle);
+            if( State === 'Scanning' ) HTML += ScanningLine;
+            if( State === 'Open'     ) HTML += DevTable(IF);
 
-            if( BLEInfo.IFaces[IF].State === 'Scanning' ) Data += Scanning;
-            if( BLEInfo.IFaces[IF].State === 'Open'     ) Data += DevTable(IF);
+            HTML += "</li>";
+            });
 
-            IFTable.innerHTML = Data;
-            });        
+        return HTML;
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -287,46 +434,107 @@ console.log(BLEInfo.IFaces[IF].State);
     // Outputs: Stringified HTML code for Dev table of IFace
     //
     function DevTable(IF) {
-        var DevTable = DTableHeader;
+
+        var HTML = "<ul>";
 
         Object.keys(BLEInfo.IFaces[IF].Devs).forEach(function (Dev) { 
 
-            if( typeof BLEInfo.IFaces[IF].Devs[Dev].State === 'undefined' )
-                BLEInfo.IFaces[IF].Devs[Dev].State = "Closed";
+            var State = BLEInfo.IFaces[IF].Devs[Dev].State;
 
-            var Triangle;
+            if( typeof State === 'Scanning' &&
+                Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services).length > 0 )
+                State = "Open";
 
-            if( BLEInfo.IFaces[IF].Devs[Dev].State === 'Closed' ) { Triangle = ClosedTriangle; }
-            else                                                  { Triangle = OpenedTriangle; }
+            HTML += '<li>';
+            HTML += DirLine.replaceAll("$TYPE","Dev")
+                           .replaceAll("$DIR" ,Dev)
+                           .replaceAll("$PATH","'" + IF + "','" + Dev + "'")
+                           .replaceAll("$OPEN",State === "Scanning" || State === "Open" ? "checked" : "");
 
-            Triangle.replaceAll("$TYPE","Dev")
-                    .replaceAll("$DIR"  ,Dev.ID);
+            if( State === 'Scanning' ) HTML += ScanningLine;
+            if( State === 'Open'     ) HTML += ServTable(IF);
 
-            var Data = DTableLine.replaceAll("$TYPE"   ,"Dev")
-                                 .replaceAll("$TRIANGLE",Triangle)
-                                 .replaceAll("$DIR",Dev);
-
-            if( BLEInfo.IFaces[IF].State === 'Scanning' ) Data += Scanning;
-            if( BLEInfo.IFaces[IF].State === 'Open'     ) Data += ServTable(IF);
-
-            DevTable.innerHTML += Data;
+            HTML += "</li>";
             });
 
-        DevTable += DTableFooter;
+        HTML += "</ul>";
 
-        return DevTable;
+        return HTML;
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // ServTable - Return HTML of Services table for specific interface
+    // ServTable - Return HTML of Services table for specific interface and device
     //
     // Inputs:  IFace of interest
     //          Dev   of interest
     //
     // Outputs: Stringified HTML code for Services table for device
     //
-    function DevTable(IF) {
-        var DevTable = DTableHeader;
+    function ServTable(IF,Dev) {
 
+        var HTML = "<ul>";
+
+        Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services).forEach(function (Serv) { 
+
+            var State = BLEInfo.IFaces[ID].Devs[Dev].Services[Serv].State;
+
+            if( typeof State === 'Scanning' &&
+                Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars).length > 0 )
+                State = "Open";
+
+            HTML += '<li>';
+            HTML += DirLine.replaceAll("$TYPE","Dev")
+                           .replaceAll("$DIR" ,Dev)
+                           .replaceAll("$PATH","'" + IF + "','" + Dev + "','" + Serv + "'")
+                           .replaceAll("$OPEN",State === "Scanning" || State === "Open" ? "checked" : "");
+
+            if( State === 'Scanning' ) HTML += ScanningLine;
+            if( State === 'Open'     ) HTML += CharTable(IF);
+
+            HTML += "</li>";
+            });
+
+        HTML += "</ul>";
+
+        return HTML;
+        }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // CharTable - Return HTML of characteristics table for specific interface
+    //
+    // Inputs:  IFace   of interest
+    //          Dev     of interest
+    //          Service of interest
+    //
+    // Outputs: Stringified HTML code for Characteristics table for device
+    //
+    function CharTable(IF,Dev,Serv) {
+
+        var HTML = "<ul>";
+
+        Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars).forEach(function (Char) { 
+
+            var State = BLEInfo.IFaces[ID].Devs[Dev].Services[Serv].Chars[Char].State;
+
+//             if( typeof State === 'Scanning' &&
+//                 Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars[Char].).length > 0 )
+//                 State = "Open";
+
+            HTML += '<li>';
+            HTML += DirLine.replaceAll("$TYPE","Dev")
+                           .replaceAll("$DIR" ,Dev)
+                           .replaceAll("$PATH",'"' + IF + "','" + Dev + "','" + Serv + "','" + Char + "'")
+                           .replaceAll("$OPEN",State === "Scanning" || State === "Open" ? "checked" : "");
+
+//             if( State === 'Scanning' ) HTML += ScanningLine;
+//             if( State === 'Open'     ) HTML += CharTable(IF);
+
+            HTML += "</li>";
+            });
+
+        HTML += "</ul>";
+
+        return HTML;
         }

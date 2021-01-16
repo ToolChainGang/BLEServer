@@ -275,17 +275,50 @@ sub WebRequest {
         }
 
     #
-    # GetDevs - Scan for devices seen by interface
+    # ScanDevs - Scan for devices seen by interface
     #
-    elsif( $Request->{Type} eq "GetDevs" ) {
+    elsif( $Request->{Type} eq "ScanDevs" ) {
         my $IFace = $Request->{Arg1};
 
-        Message("**** BLEServer: GetDevs($IFace)")
+        Message("**** BLEServer: ScanDevs($IFace)")
             if $Verbose;
 
         $Request->{Error} = ValidAccess($IFace);
 
         $BLEInfo->{IFaces}{$IFace}{Devs} = GetBLEDevs($IFace,$BLEInfo->{Timeout})
+            if $Request->{Error} eq $NoError;
+        }
+
+    #
+    # ScanServices - Scan for device services
+    #
+    elsif( $Request->{Type} eq "ScanServices" ) {
+        my $IFace = $Request->{Arg1};
+        my $Dev   = $Request->{Arg2};
+
+        Message("**** BLEServer: ScanServices($IFace,$Dev)")
+            if $Verbose;
+
+        $Request->{Error} = ValidAccess($IFace,$Dev);
+
+        $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev} = GetBLEServices($IFace,$Dev,$BLEInfo->{Timeout})
+            if $Request->{Error} eq $NoError;
+        }
+
+    #
+    # ScanChars - Scan for service characteristics
+    #
+    elsif( $Request->{Type} eq "ScanChars" ) {
+        my $IFace = $Request->{Arg1};
+        my $Dev   = $Request->{Arg2};
+        my $Serv  = $Request->{Arg3};
+
+        Message("**** BLEServer: ScanChars($IFace,$Dev,$Serv)")
+            if $Verbose;
+
+        $Request->{Error} = ValidAccess($IFace,$Dev,$Serv);
+
+        $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev} = GetBLEChars($IFace,$Dev,$Serv,$BLEInfo->{Timeout})
             if $Request->{Error} eq $NoError;
         }
 
