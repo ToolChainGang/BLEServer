@@ -33,16 +33,20 @@
 //     ->{Hostname}                                    # System name (from /etc/hostname)
 //     ->{IFaces}                                      # Available BLE interfaces
 //         ->{$IF}                                     # Interface to scan     (ex: "hci0")
-//             ->{IFace  }                             # Name of interface   (same as hash key)
+//             ->{IFace  }                             # Name of interface     (same as hash key)
 //             ->{Address}                             # Address of interface
 //             ->{Running}                             # TRUE if up and running
 //             ->{State}                               # "Open", "Closed", "Scanning"
+//             ->{HTMLID}                              # HTML object ID        ("I" + hash key)
+//             ->{Open}                                # TRUE if the checkbox exists and is open
 //             ->{Devs}                                # Scanned devices
 //                 ->{$Dev}                            # BLE device ID                 (ex: "84:2E:14:87:66:97")
 //                     ->{ID}                          # Device ID                     (same as hash key)
 //                     ->{Name}                        # Name of device                (ex: "Jovan Heart Monitor")
 //                     ->{Names}[]                     # Array of names returned in scan
 //                     ->{State}                       # "Open", "Closed", "Scanning"
+//                     ->{HTMLID}                      # HTML object ID                ("D" + Hash key)
+//                     ->{Open}                        # TRUE if the checkbox exists and is open
 //                     ->{Services}                    # Services available
 //                         ->{$UUID}                   # UUID of service               (ex: "00001801-0000-1000-8000-00805f9b34fb")
 //                             ->{UUID}                # Service UUID                  (same as hash key)
@@ -50,6 +54,8 @@
 //                             ->{HDStart}             # Start of characteristics
 //                             ->{HDEnd}               # End   of characteristics
 //                             ->{State}               # "Open", "Closed", "Scanning"
+//                             ->{HTMLID}              # HTML object ID                ("S" + Hash key)
+//                             ->{Open}                # TRUE if the checkbox exists and is open
 //                             ->{Chars}               # List of available characteristics
 //                                 ->{$Char}           # Handle for this char          (ex: "0002")
 //                                     ->{Handle}      # Handle                        (same as hash key)
@@ -58,6 +64,9 @@
 //                                     ->{UUID}        # Full UUID of characteristic   (ex: "00001801-0000-1000-8000-00805f9b34fb")
 //                                     ->{Service}     # First 8 digits of char UUID   (ex: "00001801")
 //                                     ->{State}       # "Open", "Closed", "Scanning"
+//                                     ->{HTMLID}      # HTML object ID                ("C" + Hash key)
+//                                     ->{Open}        # TRUE if the checkbox exists and is open
+//                                     ->{Values}      # List of seen values
 //
 // In what follows: $TYPE  Is the type of the directory (ex: "IF")
 //                  $DIR   Is the name of the directory (ex: "hci0", which is of yupe IF
@@ -82,8 +91,8 @@
     // Directory list line
     //
     DirLine = '\
-        <input type="checkbox" $OPEN id="$DIRInput" onclick="Toggle$TYPE($PATH)" />   \
-        <label class="tree_label" for="$DIRInput">$DIR</label>';
+        <input type="checkbox" $OPEN id="$HTMLID" onclick="Toggle(this)" />   \
+        <label class="tree_label" for="$HTMLID">$DIR</label>';
 
     //
     // "Scanning" mode line
@@ -91,38 +100,11 @@
     var ScanningLine = '\
         <ul><li><span class="tree_label">Scanning...</span></li></ul>';
 
-// <ul class="tree">
-//   <li>
-//     <input type="checkbox" checked="checked" id="c1" />
-//     <label class="tree_label" for="c1">Level 0</label>
-//     <ul>
-//       <li>
-//         <input type="checkbox" checked="checked" id="c2" />
-//         <label for="c2" class="tree_label">Level 1</label>
-//         <ul>
-//           <li><span class="tree_label">Level 2</span></li>
-//           <li><span class="tree_label">Level 2</span></li>
-//         </ul>
-//       </li>
-//       <li>
-//         <input type="checkbox" id="c3" />
-//         <label for="c3" class="tree_label">Looong level 1 <br/>label text <br/>with line-breaks</label>
-//         <ul>
-//           <li><span class="tree_label">Level 2</span></li>
-//           <li>
-//             <input type="checkbox" id="c4" />
-//             <label for="c4" class="tree_label"><span class="tree_custom">Specified tree item view</span></label>
-//             <ul>
-//               <li><span class="tree_label">Level 3</span></li>
-//             </ul>
-//           </li>
-//         </ul>
-//       </li>
-//     </ul>
-//   </li>
-
-
-
+    //
+    // "None" mode line
+    //
+    var NoneLine = '\
+        <ul><li><span class="tree_label">None.</span></li></ul>';
 
     //
     // On first load, calculate reliable page dimensions and do page-specific initialization
@@ -159,7 +141,7 @@
         ConfigSocket.onmessage = function(Event) {
             ConfigData = JSON.parse(Event.data);
 
-//                console.log("Msg: "+Event.data);
+//            console.log("Msg: "+Event.data);
 
             if( ConfigData["Error"] != "No error." ) {
                 console.log("Error: "+ConfigData["Error"]);
@@ -184,17 +166,20 @@
 
                 DisplayBLEInfo();
                 GotoPage("MainPage");
+                ServerCommand("ScanIFs");
                 return;
                 }
 
-            if( ConfigData["Type"] == "ScanDevs"     ||
+            if( ConfigData["Type"] == "ScanIFs"      ||
+                ConfigData["Type"] == "ScanDevs"     ||
                 ConfigData["Type"] == "ScanServices" ||
                 ConfigData["Type"] == "ScanChars"    ) {
-                console.log("Msg: "+Event.data);
+//                console.log("Msg: "+Event.data);
 
                 BLEInfo = ConfigData.State;
                 SetStates(BLEInfo);
                 DisplayBLEInfo();
+                return;
                 }
 
             //
@@ -252,28 +237,43 @@
     //
     // Inputs:  BLEInfo to set
     //
-    // Outputs: None. Dir.State is set in the passed BLEInfo
+    // Outputs: None.
+    //
+    // The following vars are set for each dir object in BLEInfo:
+    //
+    //              HTMLID  HTML object id, valid for HTML "ID" field
+    //              Open    Whether the checkbox should be open or closed
     //
     function SetStates(BLEInfo) {
 
+        if( !BLEInfo.IFaces )
+            return;
+
         Object.keys(BLEInfo.IFaces).forEach(function (IF) { 
 
-            if( SetState(BLEInfo.IFaces[IF],
-                         BLEInfo.IFaces[IF].Devs) )
+            var Dir = BLEInfo.IFaces[IF];
+            if( SetState(Dir,IF,"I",Dir.Devs) )
                 return;
 
             Object.keys(BLEInfo.IFaces[IF].Devs).forEach(function (Dev) { 
 
-                if( SetState(BLEInfo.IFaces[IF].Devs[Dev],
-                             BLEInfo.IFaces[IF].Devs[Dev].Services) )
+                var Dir = BLEInfo.IFaces[IF].Devs[Dev];
+                if( SetState(Dir,Dev,"D",Dir.Services) )
                     return;
 
                 Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services).forEach(function (Serv) { 
 
-                    if( SetState(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv],
-                                 BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars) )
+                    var Dir = BLEInfo.IFaces[IF].Devs[Dev].Services[Serv];
+                    if( SetState(Dir,Serv,"S",Dir.Chars) )
                         return;
 
+                    Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars).forEach(function (Char) { 
+
+                        var Dir = BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars[Char];
+                        if( SetState(Dir,Char,"C",Dir.Values) )
+                            return;
+
+                        });
                     });
                 });
             });
@@ -283,104 +283,105 @@
     //
     // SetState - Set Dir state to known value
     //
-    // Inputs:  Directory to set (an IF, Dev, Service, or Char)
-    //          Subdir of directory
+    // Inputs:  Directory to set   (an IF, Dev, Service, or Char)
+    //          Name of Dir        (ex: "hci0")
+    //          Prefix char for ID (  "I", "D", "S",     or "C" )
+    //          Next-level subdir to directory
     //
     // Outputs: 0 if subdir contains entries to be processed
-    //          1 if subdir is undefined (or empty) and recursive processing should be skipped.
+    //          1 if subdir is undefined and recursive processing should be skipped.
     //
-    function SetState(Dir,Arr) {
+    function SetState(Dir,Name,Prefix,Arr) {
 
-        if( typeof Dir.State === 'undefined' )
-            Dir.State = 'Closed';
+        Dir.HTMLID = Prefix + Name;
+        Dir.Open   = false;
 
-        if( typeof Arr === 'undefined' )
+        var Checkbox = document.getElementById(Dir.HTMLID);
+
+        if( Checkbox ) {
+            Dir.Open = Checkbox.checked;
+            }
+
+        if( !Arr )
             return 1;
-
-        if( Dir.State === 'Scanning' && Object.keys(Arr).length > 0 )
-            Dir.State = "Open";
 
         return Object.keys(Arr).length == 0;
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // ToggleState - Toggle one individual state var
+    // Toggle - Toggle one individual dir Open <-> Closed
     //
-    // Inputs:  Directory to toggle (an IF, Dev, Service, or Char)
+    // Inputs:  Object that was toggled
     //
-    // Outputs: None. State is changed in place.
+    // Outputs: None. Open is changed in place.
     //
-    function ToggleState(Dir) {
+    function Toggle(self) {
+        var HTMLID  = self.id;
+        var Toggled = false;
 
-        if     ( Dir.State === "Closed"   ) { Dir.State = 'Open'  ; }
-        else if( Dir.State === "Open"     ) { Dir.State = 'Closed'; }
-        else if( Dir.State === "Scanning" ) { Dir.State = 'Closed'; }
-        }
+        Object.keys(BLEInfo.IFaces).forEach(function (IF) { 
 
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    //
-    // ToggleIF - Toggle an interface dir
-    //
-    // Inputs:  IF to toggle
-    //
-    // Outputs: None. State is changed in place.
-    //
-    function ToggleIF(IF) {
+            if( Toggled ) return;
+            var Dir = BLEInfo.IFaces[IF];
 
-        ToggleState(BLEInfo.IFaces[IF]);
+            if( Dir.HTMLID === HTMLID ) {
+                Dir.Open = !Dir.Open;
+                Toggled  = true;
+                if( Dir.Open && typeof Dir.Devs === "undefined" )
+                    ServerCommand("ScanDevs",IF);
+                return;
+                }
 
-        if( BLEInfo.IFaces[IF].State === "Open" && typeof BLEInfo.IFaces[IF].Devs == "undefined" ) {
-            BLEInfo.IFaces[IF].State === "Scanning";
-            ServerCommand("ScanDevs",IF);
-            }
+            if( !Dir.Devs )
+                return;
 
-        DisplayBLEInfo();
-        }
+            Object.keys(BLEInfo.IFaces[IF].Devs).forEach(function (Dev) { 
 
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    //
-    // ToggleDev - Toggle a device listing
-    //
-    // Inputs:  IF  of device
-    //          Dev to toggle
-    //
-    // Outputs: None. State is changed in place.
-    //
-    function ToggleDev(IF,Dev) {
+                if( Toggled ) return;
+                var Dir = BLEInfo.IFaces[IF].Devs[Dev];
 
-        ToggleState(BLEInfo.IFaces[IF].Devs[Dev]);
+                if( Dir.HTMLID === HTMLID ) {
+                    Dir.Open = !Dir.Open;
+                    Toggled  = true;
+                    if( Dir.Open && typeof Dir.Services === "undefined" )
+                        ServerCommand("ScanServices",IF,Dev);
+                    return;
+                    }
 
-        if(        BLEInfo.IFaces[IF].Devs[Dev].State    === "Open"      && 
-            typeof BLEInfo.IFaces[IF].Devs[Dev].Services === "undefined" ) {
-            BLEInfo.IFaces[IF].Devs[Dev].State === "Scanning";
-            ServerCommand("ScanServices",IF,Dev);
-            }
+                if( !Dir.Services )
+                    return;
 
-        DisplayBLEInfo();
-        }
+                Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services).forEach(function (Serv) { 
 
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    //
-    // ToggleServ - Toggle a service listing
-    //
-    // Inputs:  IF  of device
-    //          Device
-    //          Service to toggle
-    //
-    // Outputs: None. State is changed in place.
-    //
-    function ToggleServ(IF,Dev,Serv) {
+                    if( Toggled ) return;
+                    var Dir = BLEInfo.IFaces[IF].Devs[Dev].Services[Serv];
 
-        ToggleState(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv]);
+                    if( Dir.HTMLID === HTMLID ) {
+                        Dir.Open = !Dir.Open;
+                        Toggled  = true;
+                        if( Dir.Open && typeof Dir.Chars === "undefined" )
+                            ServerCommand("ScanChars",IF,Dev,Serv);
+                        return;
+                        }
 
-        if(        BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].State === "Open"     && 
-            typeof BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars === "undefined" ) {
-            BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].State === "Scanning";
-            ServerCommand("ScanChars",IF,Dev,Serv);
-            }
+                    if( !Dir.Chars )
+                        return;
 
-        DisplayBLEInfo();
+                    Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars).forEach(function (Char) { 
+
+                        if( Toggled ) return;
+                        var Dir = BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars[Char];
+
+                        if( Dir.HTMLID === HTMLID ) {
+                            Dir.Open = !Dir.Open;
+                            Toggled  = true;
+                            return;
+                            }
+                        });
+                    });
+                });
+            });
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -389,38 +390,45 @@
     //
     function DisplayBLEInfo() {
 
-        var HTML = IFTable();
+        var HTML;
+
+        if     ( !BLEInfo.IFaces                          ) HTML = ScanningLine;
+        else if( Object.keys(BLEInfo.IFaces).length ==  0 ) HTML = NoneLine;
+        else                                                HTML = IFTable();
 
         document.getElementById("IFTable").innerHTML = HTML;                   // Always exists
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // IFTable - Display the HTML for the IF table
+    // IFTable - Return the HTML for the IF table
     //
     function IFTable() {
 
-        var HTML = "";          // <ul> already exists in the page
+        var HTML = '<ul class="tree">';
 
         Object.keys(BLEInfo.IFaces).forEach(function (IF) { 
 
-            var State = BLEInfo.IFaces[IF].State;
+            var Dir    = BLEInfo.IFaces[IF];
+            var SubDir = Dir.Devs;
 
-            if( State === 'Scanning' &&
-                Object.keys(BLEInfo.IFaces[IF].Devs).length > 0 )
-                State = "Open";
-
+            //
+            // <input type="checkbox" $OPEN id="$HTMLIDInput" onclick="Toggle()" />
+            // <label class="tree_label" for="$HTMLIDInput">$DIR</label>';
+            //
             HTML += '<li>';
-            HTML += DirLine.replaceAll("$TYPE","IF")
-                           .replaceAll("$DIR" ,IF)
-                           .replaceAll("$PATH","'" + IF + "'")
-                           .replaceAll("$OPEN",State === "Scanning" || State === "Open" ? "checked" : "");
+            HTML += DirLine.replaceAll("$OPEN"  ,Dir.Open ? "checked" : "")
+                           .replaceAll("$DIR"   ,IF)
+                           .replaceAll("$HTMLID",Dir.HTMLID);
 
-            if( State === 'Scanning' ) HTML += ScanningLine;
-            if( State === 'Open'     ) HTML += DevTable(IF);
+            if     ( typeof SubDir              === 'undefined' ) HTML += ScanningLine;
+            else if( Object.keys(SubDir).length ==  0           ) HTML += NoneLine;
+            else return                                           HTML += DevTable(IF);
 
             HTML += "</li>";
             });
+
+        HTML += "</ul>";
 
         return HTML;
         }
@@ -435,24 +443,25 @@
     //
     function DevTable(IF) {
 
-        var HTML = "<ul>";
+        var HTML = '<ul>';
 
         Object.keys(BLEInfo.IFaces[IF].Devs).forEach(function (Dev) { 
 
-            var State = BLEInfo.IFaces[IF].Devs[Dev].State;
+            var Dir    = BLEInfo.IFaces[IF].Devs[Dev];
+            var SubDir = Dir.Services;
 
-            if( typeof State === 'Scanning' &&
-                Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services).length > 0 )
-                State = "Open";
-
+            //
+            // <input type="checkbox" $OPEN id="$HTMLIDInput" onclick="Toggle()" />
+            // <label class="tree_label" for="$HTMLIDInput">$DIR</label>';
+            //
             HTML += '<li>';
-            HTML += DirLine.replaceAll("$TYPE","Dev")
-                           .replaceAll("$DIR" ,Dev)
-                           .replaceAll("$PATH","'" + IF + "','" + Dev + "'")
-                           .replaceAll("$OPEN",State === "Scanning" || State === "Open" ? "checked" : "");
+            HTML += DirLine.replaceAll("$OPEN"  ,Dir.Open ? "checked" : "")
+                           .replaceAll("$DIR"   ,"Device: " + Dev + ": " + Dir.Name)
+                           .replaceAll("$HTMLID",Dir.HTMLID);
 
-            if( State === 'Scanning' ) HTML += ScanningLine;
-            if( State === 'Open'     ) HTML += ServTable(IF);
+            if     ( typeof SubDir              === 'undefined' ) HTML += ScanningLine;
+            else if( Object.keys(SubDir).length ==  0           ) HTML += NoneLine;
+            else                                                  HTML += ServTable(IF,Dev);
 
             HTML += "</li>";
             });
@@ -473,24 +482,24 @@
     //
     function ServTable(IF,Dev) {
 
-        var HTML = "<ul>";
+        var HTML = '<ul>';
 
         Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services).forEach(function (Serv) { 
+            var Dir    = BLEInfo.IFaces[IF].Devs[Dev].Services[Serv];
+            var SubDir = Dir.Chars;
 
-            var State = BLEInfo.IFaces[ID].Devs[Dev].Services[Serv].State;
-
-            if( typeof State === 'Scanning' &&
-                Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars).length > 0 )
-                State = "Open";
-
+            //
+            // <input type="checkbox" $OPEN id="$HTMLIDInput" onclick="Toggle()" />
+            // <label class="tree_label" for="$HTMLIDInput">$DIR</label>';
+            //
             HTML += '<li>';
-            HTML += DirLine.replaceAll("$TYPE","Dev")
-                           .replaceAll("$DIR" ,Dev)
-                           .replaceAll("$PATH","'" + IF + "','" + Dev + "','" + Serv + "'")
-                           .replaceAll("$OPEN",State === "Scanning" || State === "Open" ? "checked" : "");
+            HTML += DirLine.replaceAll("$OPEN"  ,Dir.Open ? "checked" : "")
+                           .replaceAll("$DIR"   ,"Service: " + Serv)
+                           .replaceAll("$HTMLID",Dir.HTMLID);
 
-            if( State === 'Scanning' ) HTML += ScanningLine;
-            if( State === 'Open'     ) HTML += CharTable(IF);
+            if     ( typeof SubDir              === 'undefined' ) HTML += ScanningLine;
+            else if( Object.keys(SubDir).length ==  0           ) HTML += NoneLine;
+            else                                                  HTML += CharTable(IF,Dev,Serv);
 
             HTML += "</li>";
             });
@@ -512,24 +521,25 @@
     //
     function CharTable(IF,Dev,Serv) {
 
-        var HTML = "<ul>";
+        var HTML = '<ul>';
 
-        Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars).forEach(function (Char) { 
+        Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv]).forEach(function (Char) { 
 
-            var State = BLEInfo.IFaces[ID].Devs[Dev].Services[Serv].Chars[Char].State;
+            var Dir    = BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars[Char];
+            var SubDir = Dir.Values;
 
-//             if( typeof State === 'Scanning' &&
-//                 Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars[Char].).length > 0 )
-//                 State = "Open";
-
+            //
+            // <input type="checkbox" $OPEN id="$HTMLIDInput" onclick="Toggle()" />
+            // <label class="tree_label" for="$HTMLIDInput">$DIR</label>';
+            //
             HTML += '<li>';
-            HTML += DirLine.replaceAll("$TYPE","Dev")
-                           .replaceAll("$DIR" ,Dev)
-                           .replaceAll("$PATH",'"' + IF + "','" + Dev + "','" + Serv + "','" + Char + "'")
-                           .replaceAll("$OPEN",State === "Scanning" || State === "Open" ? "checked" : "");
+            HTML += DirLine.replaceAll("$OPEN",Dir.Open ? "checked" : "")
+                           .replaceAll("$DIR" ,"Char: " + Char)
+                           .replaceAll("$HTMLID",Dir.HTMLID);
 
-//             if( State === 'Scanning' ) HTML += ScanningLine;
-//             if( State === 'Open'     ) HTML += CharTable(IF);
+//            if     ( typeof SubDir              === 'undefined' ) HTML += ScanningLine;
+//            else if( Object.keys(SubDir).length ==  0           ) HTML += NoneLine;
+//            else                                                  HTML += CharTable(IF,Dev,Serv);
 
             HTML += "</li>";
             });

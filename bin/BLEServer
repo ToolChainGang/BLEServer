@@ -147,8 +147,8 @@ $Verbose = 1
     if defined $ARGV[0] and $ARGV[0] eq "-v";
 
 $BLEInfo = { Timeout  => $DEFAULT_TIMEOUT,
-             Hostname => GetHostname,
-             IFaces   => GetBLEIFaces() };
+             Hostname => GetHostname(),
+             };
 
 # print Data::Dumper->Dump([$BLEInfo],["BLEInfo"]);
 # exit(0);
@@ -268,10 +268,23 @@ sub WebRequest {
     if( $Request->{Type} eq "GetBLEInfo" ) {
         Message("**** BLEServer: GetBLEInfo()")
             if $Verbose;
-        $Request->{Error} = $NoError;
+        $Request->{ Error} = $NoError;
+        $BLEInfo->{IFaces} = undef;
         #
         # Returning $BLEInfo is the default (see below)
         #
+        }
+
+    #
+    # ScanIFs - Scan for interfaces that can handle BLE
+    #
+    elsif( $Request->{Type} eq "ScanIFs" ) {
+
+        Message("**** BLEServer: ScanIFs()")
+            if $Verbose;
+
+        $Request->{ Error} = $NoError;
+        $BLEInfo->{IFaces} = GetBLEIFaces($BLEInfo->{Timeout});
         }
 
     #
@@ -301,7 +314,7 @@ sub WebRequest {
 
         $Request->{Error} = ValidAccess($IFace,$Dev);
 
-        $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev} = GetBLEServices($IFace,$Dev,$BLEInfo->{Timeout})
+        $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev}{Services} = GetBLEServices($IFace,$Dev,$BLEInfo->{Timeout})
             if $Request->{Error} eq $NoError;
         }
 
