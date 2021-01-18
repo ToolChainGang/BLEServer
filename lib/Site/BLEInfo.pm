@@ -36,8 +36,8 @@
 ##          ->{$UUID}                           UUID of service         (ex: "00001801-0000-1000-8000-00805f9b34fb")
 ##              ->{UUID}                            Service ID          (same as hash key)
 ##              ->{Service}                         First 8 hex digits of UUID
-##              ->{HDStart}                         Start of characteristics
-##              ->{HDEnd}                           End   of characteristics
+##              ->{HStart}                          Start of characteristics
+##              ->{HEnd}                            End   of characteristics
 ##
 ##      GetBLEChars($IFace,$Dev,$HStart,$HEnd
 ##                          ($Timeout=10))  Return a hash of characteristics
@@ -154,8 +154,8 @@ our $IDMatches = [
 our $ServiceMatches = [
     {                    RegEx => qr/uuid:\s($UUIDMatch)$/         , Action => Site::ParseData::StartSection },
     { Name => "UUID"   , RegEx => qr/uuid:\s($UUIDMatch)$/         , Action => Site::ParseData::AddVar       },
-    { Name => "HDStart", RegEx => qr/attr handle = 0x($H4Match)/   , Action => Site::ParseData::AddVar       },
-    { Name => "HDEnd"  , RegEx => qr/end grp handle = 0x($H4Match)/, Action => Site::ParseData::AddVar       },
+    { Name => "HStart",  RegEx => qr/attr handle = 0x($H4Match)/   , Action => Site::ParseData::AddVar       },
+    { Name => "HEnd"  ,  RegEx => qr/end grp handle = 0x($H4Match)/, Action => Site::ParseData::AddVar       },
     { Name => "Service", RegEx => qr/uuid:\s($H8Match)/            , Action => Site::ParseData::AddVar       },
     ];
 

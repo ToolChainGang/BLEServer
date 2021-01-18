@@ -36,26 +36,17 @@
 //             ->{IFace  }                             # Name of interface     (same as hash key)
 //             ->{Address}                             # Address of interface
 //             ->{Running}                             # TRUE if up and running
-//             ->{State}                               # "Open", "Closed", "Scanning"
-//             ->{HTMLID}                              # HTML object ID        ("I" + hash key)
-//             ->{Open}                                # TRUE if the checkbox exists and is open
 //             ->{Devs}                                # Scanned devices
 //                 ->{$Dev}                            # BLE device ID                 (ex: "84:2E:14:87:66:97")
 //                     ->{ID}                          # Device ID                     (same as hash key)
 //                     ->{Name}                        # Name of device                (ex: "Jovan Heart Monitor")
 //                     ->{Names}[]                     # Array of names returned in scan
-//                     ->{State}                       # "Open", "Closed", "Scanning"
-//                     ->{HTMLID}                      # HTML object ID                ("D" + Hash key)
-//                     ->{Open}                        # TRUE if the checkbox exists and is open
 //                     ->{Services}                    # Services available
 //                         ->{$UUID}                   # UUID of service               (ex: "00001801-0000-1000-8000-00805f9b34fb")
 //                             ->{UUID}                # Service UUID                  (same as hash key)
 //                             ->{Service}             # First 8 hex digits of UUID    (ex: "00001801")
 //                             ->{HDStart}             # Start of characteristics
 //                             ->{HDEnd}               # End   of characteristics
-//                             ->{State}               # "Open", "Closed", "Scanning"
-//                             ->{HTMLID}              # HTML object ID                ("S" + Hash key)
-//                             ->{Open}                # TRUE if the checkbox exists and is open
 //                             ->{Chars}               # List of available characteristics
 //                                 ->{$Char}           # Handle for this char          (ex: "0002")
 //                                     ->{Handle}      # Handle                        (same as hash key)
@@ -63,16 +54,9 @@
 //                                     ->{Properties}  # R/W, etc
 //                                     ->{UUID}        # Full UUID of characteristic   (ex: "00001801-0000-1000-8000-00805f9b34fb")
 //                                     ->{Service}     # First 8 digits of char UUID   (ex: "00001801")
-//                                     ->{State}       # "Open", "Closed", "Scanning"
-//                                     ->{HTMLID}      # HTML object ID                ("C" + Hash key)
-//                                     ->{Open}        # TRUE if the checkbox exists and is open
 //                                     ->{Values}      # List of seen values
 //
-// In what follows: $TYPE  Is the type of the directory (ex: "IF")
-//                  $DIR   Is the name of the directory (ex: "hci0", which is of yupe IF
-//
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
 
     var ConfigSystem = location.hostname;
     var ConfigAddr   = "ws:" + ConfigSystem + ":2021";
@@ -84,27 +68,7 @@
     var WindowHeight;
 
     var BLEInfo;
-    var PrevBLEInfo;
-    var Populated = 0;      // TRUE if web page tables populated from GPIOInfo
-
-    //
-    // Directory list line
-    //
-    DirLine = '\
-        <input type="checkbox" $OPEN id="$HTMLID" onclick="Toggle(this)" />   \
-        <label class="tree_label" for="$HTMLID">$DIR</label>';
-
-    //
-    // "Scanning" mode line
-    //
-    var ScanningLine = '\
-        <ul><li><span class="tree_label">Scanning...</span></li></ul>';
-
-    //
-    // "None" mode line
-    //
-    var NoneLine = '\
-        <ul><li><span class="tree_label">None.</span></li></ul>';
+    var BLETree;
 
     //
     // On first load, calculate reliable page dimensions and do page-specific initialization
@@ -157,7 +121,6 @@
 //                console.log(BLEInfo);
 
                 BLEInfo = ConfigData.State;
-                SetStates(BLEInfo);
 
                 HostnameElements = document.getElementsByClassName("Hostname");
                 for (i = 0; i < HostnameElements.length; i++) {
@@ -177,7 +140,6 @@
 //                console.log("Msg: "+Event.data);
 
                 BLEInfo = ConfigData.State;
-                SetStates(BLEInfo);
                 DisplayBLEInfo();
                 return;
                 }
@@ -217,7 +179,7 @@
     //
     // PopulateMainPage - Populate the landing page as needed
     //
-    function PopulateMainPage() { DisplayBLEInfo(); }
+    function PopulateMainPage() {}
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
@@ -233,83 +195,6 @@
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // SetStates - Set all BLEInfo State vars
-    //
-    // Inputs:  BLEInfo to set
-    //
-    // Outputs: None.
-    //
-    // The following vars are set for each dir object in BLEInfo:
-    //
-    //              HTMLID  HTML object id, valid for HTML "ID" field
-    //              Open    Whether the checkbox should be open or closed
-    //
-    function SetStates(BLEInfo) {
-
-        if( !BLEInfo.IFaces )
-            return;
-
-        Object.keys(BLEInfo.IFaces).forEach(function (IF) { 
-
-            var Dir = BLEInfo.IFaces[IF];
-            if( SetState(Dir,IF,"I",Dir.Devs) )
-                return;
-
-            Object.keys(BLEInfo.IFaces[IF].Devs).forEach(function (Dev) { 
-
-                var Dir = BLEInfo.IFaces[IF].Devs[Dev];
-                if( SetState(Dir,Dev,"D",Dir.Services) )
-                    return;
-
-                Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services).forEach(function (Serv) { 
-
-                    var Dir = BLEInfo.IFaces[IF].Devs[Dev].Services[Serv];
-                    if( SetState(Dir,Serv,"S",Dir.Chars) )
-                        return;
-
-                    Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars).forEach(function (Char) { 
-
-                        var Dir = BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars[Char];
-                        if( SetState(Dir,Char,"C",Dir.Values) )
-                            return;
-
-                        });
-                    });
-                });
-            });
-        }
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    //
-    // SetState - Set Dir state to known value
-    //
-    // Inputs:  Directory to set   (an IF, Dev, Service, or Char)
-    //          Name of Dir        (ex: "hci0")
-    //          Prefix char for ID (  "I", "D", "S",     or "C" )
-    //          Next-level subdir to directory
-    //
-    // Outputs: 0 if subdir contains entries to be processed
-    //          1 if subdir is undefined and recursive processing should be skipped.
-    //
-    function SetState(Dir,Name,Prefix,Arr) {
-
-        Dir.HTMLID = Prefix + Name;
-        Dir.Open   = false;
-
-        var Checkbox = document.getElementById(Dir.HTMLID);
-
-        if( Checkbox ) {
-            Dir.Open = Checkbox.checked;
-            }
-
-        if( !Arr )
-            return 1;
-
-        return Object.keys(Arr).length == 0;
-        }
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    //
     // Toggle - Toggle one individual dir Open <-> Closed
     //
     // Inputs:  Object that was toggled
@@ -318,70 +203,8 @@
     //
     function Toggle(self) {
         var HTMLID  = self.id;
-        var Toggled = false;
 
-        Object.keys(BLEInfo.IFaces).forEach(function (IF) { 
-
-            if( Toggled ) return;
-            var Dir = BLEInfo.IFaces[IF];
-
-            if( Dir.HTMLID === HTMLID ) {
-                Dir.Open = !Dir.Open;
-                Toggled  = true;
-                if( Dir.Open && typeof Dir.Devs === "undefined" )
-                    ServerCommand("ScanDevs",IF);
-                return;
-                }
-
-            if( !Dir.Devs )
-                return;
-
-            Object.keys(BLEInfo.IFaces[IF].Devs).forEach(function (Dev) { 
-
-                if( Toggled ) return;
-                var Dir = BLEInfo.IFaces[IF].Devs[Dev];
-
-                if( Dir.HTMLID === HTMLID ) {
-                    Dir.Open = !Dir.Open;
-                    Toggled  = true;
-                    if( Dir.Open && typeof Dir.Services === "undefined" )
-                        ServerCommand("ScanServices",IF,Dev);
-                    return;
-                    }
-
-                if( !Dir.Services )
-                    return;
-
-                Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services).forEach(function (Serv) { 
-
-                    if( Toggled ) return;
-                    var Dir = BLEInfo.IFaces[IF].Devs[Dev].Services[Serv];
-
-                    if( Dir.HTMLID === HTMLID ) {
-                        Dir.Open = !Dir.Open;
-                        Toggled  = true;
-                        if( Dir.Open && typeof Dir.Chars === "undefined" )
-                            ServerCommand("ScanChars",IF,Dev,Serv);
-                        return;
-                        }
-
-                    if( !Dir.Chars )
-                        return;
-
-                    Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars).forEach(function (Char) { 
-
-                        if( Toggled ) return;
-                        var Dir = BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars[Char];
-
-                        if( Dir.HTMLID === HTMLID ) {
-                            Dir.Open = !Dir.Open;
-                            Toggled  = true;
-                            return;
-                            }
-                        });
-                    });
-                });
-            });
+        BLETree.Find(HTMLID).Toggle();
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -389,162 +212,250 @@
     // DisplayBLEInfo - Display the BLE info tree
     //
     function DisplayBLEInfo() {
-
         var HTML;
 
-        if     ( !BLEInfo.IFaces                          ) HTML = ScanningLine;
-        else if( Object.keys(BLEInfo.IFaces).length ==  0 ) HTML = NoneLine;
-        else                                                HTML = IFTable();
+        HTML = BLETree.DirLine();
 
-        document.getElementById("IFTable").innerHTML = HTML;                   // Always exists
+        document.getElementById("IFTable2").innerHTML = HTML;
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // IFTable - Return the HTML for the IF table
+    // TreeDir - Base class for tree structure containing directory-like elements
     //
-    function IFTable() {
+    class TreeDir {
 
-        var HTML = '<ul class="tree">';
+        constructor(Type,Prefix,Name,Dir,SubDir,DataFunc,Parent) {
+            this.Type   = Type;             // ex: "IF"
+            this.Prefix = Prefix;           // ex: "I"
+            this.Name   = Name;             // ex: "hci0"
+            this.Dir    = Dir;              // ex: [...].IFaces[$IF]
+            this.Parent = Parent;
 
-        Object.keys(BLEInfo.IFaces).forEach(function (IF) { 
+            this.HTMLID = this.Prefix + this.Name;
+            this.SetOpen();
 
-            var Dir    = BLEInfo.IFaces[IF];
-            var SubDir = Dir.Devs;
+            this.Scanned = false;
+            this.SubDir  = {};              // ex: Dir.Devs
+            if( !SubDir )
+                return;
 
-            //
-            // <input type="checkbox" $OPEN id="$HTMLIDInput" onclick="Toggle()" />
-            // <label class="tree_label" for="$HTMLIDInput">$DIR</label>';
-            //
+            this.Scanned = true;            // Subdir exists (but may be empty)
+            Object.keys(SubDir).sort().forEach(function (Elem) { 
+                var SubTree = new DataFunc(SubDir[Elem],this);
+                this.SubDir[SubTree.Name] = SubTree;
+                },this);
+            }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        //
+        // SetOpen - Set Dir open state based on existing checkbox
+        //
+        SetOpen() {
+
+            this.Open    = false;
+            var Checkbox = document.getElementById(this.HTMLID);
+
+            if( Checkbox )
+                this.Open = Checkbox.checked;
+            }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        //
+        // DirLine - Return the HTML for the directory line of this Dir
+        //
+        DirLine() {
+            var HTML = "";
+
             HTML += '<li>';
-            HTML += DirLine.replaceAll("$OPEN"  ,Dir.Open ? "checked" : "")
-                           .replaceAll("$DIR"   ,IF)
-                           .replaceAll("$HTMLID",Dir.HTMLID);
+            HTML += TreeDir.DirLineTemplate.replaceAll("$OPEN"  ,this.Open ? "checked" : "")
+                                           .replaceAll("$DIR"   ,this.DataLine())
+                                           .replaceAll("$HTMLID",this.HTMLID);
 
-            if     ( typeof SubDir              === 'undefined' ) HTML += ScanningLine;
-            else if( Object.keys(SubDir).length ==  0           ) HTML += NoneLine;
-            else return                                           HTML += DevTable(IF);
+            HTML += "<ul>"
+            if     ( !this.Scanned                         ) HTML += ScanningLine;
+            else if( Object.keys(this.SubDir).length ==  0 ) HTML += NoneLine;
+            else {
+                for (const Entry of Object.keys(this.SubDir).sort())
+                    HTML += this.SubDir[Entry].DirLine();
+                }
+            HTML += "</ul>";
 
             HTML += "</li>";
-            });
+            return HTML;
+            }
 
-        HTML += "</ul>";
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        //
+        // DataLine - Return the HTML for the data within the DIR line.
+        //
+        DataLine() {
+            return this.Name;
+            }
 
-        return HTML;
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        //
+        // Find - Find the Dir with the specified HTMLID
+        //
+        Find(HTMLID) {
+
+            if( HTMLID == this.HTMLID )
+                return this;
+
+            if( !this.SubDir )
+                return null;
+
+            for (const Entry of Object.keys(this.SubDir)) {
+
+                var Dir = this.SubDir[Entry].Find(HTMLID);
+                if( Dir )
+                    return Dir;
+                }
+
+            return null;
+            }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        //
+        // Toggle - Togle the open/closed state
+        //
+        Toggle() {
+            this.SetOpen();         // Gets current value from checkbox
+
+            if( this.Open && !this.Scanned )
+                this.ServerScan();
+            }
+
+        //
+        // Directory list line
+        //
+        static DirLineTemplate = '\
+            <input type="checkbox" $OPEN id="$HTMLID" onclick="Toggle(this)" />   \
+            <label class="tree_label" for="$HTMLID">$DIR</label>';
+
+        //
+        // "Scanning" mode line
+        //
+        static ScanningLine = '\
+            <ul><li><span class="tree_label">Scanning...</span></li></ul>';
+
+        //
+        // "None" mode line
+        //
+        static NoneLine = '\
+            <ul><li><span class="tree_label">None.</span></li></ul>';
+
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // DevTable - Return HTML of Device table for specific interface
+    // BLEDir - Top-level directory structure for BLEInfo
     //
-    // Inputs:  IFace of interest
-    //
-    // Outputs: Stringified HTML code for Dev table of IFace
-    //
-    function DevTable(IF) {
+    class BLEDir extends TreeDir {
 
-        var HTML = '<ul>';
+        constructor(Dir) {
+            super("BLE","B","BLEInfo",Dir,Dir.IFaces,IFDir,null);
+            }
 
-        Object.keys(BLEInfo.IFaces[IF].Devs).forEach(function (Dev) { 
+        ServerScan() {
+            ServerCommand("ScanIFs");
+            }
 
-            var Dir    = BLEInfo.IFaces[IF].Devs[Dev];
-            var SubDir = Dir.Services;
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        //
+        // DirLine - Top level has no checkbox. Also, UL is tree class
+        //
+        DirLine() {
+            var HTML = "";
 
-            //
-            // <input type="checkbox" $OPEN id="$HTMLIDInput" onclick="Toggle()" />
-            // <label class="tree_label" for="$HTMLIDInput">$DIR</label>';
-            //
-            HTML += '<li>';
-            HTML += DirLine.replaceAll("$OPEN"  ,Dir.Open ? "checked" : "")
-                           .replaceAll("$DIR"   ,"Device: " + Dev + ": " + Dir.Name)
-                           .replaceAll("$HTMLID",Dir.HTMLID);
+            HTML += '<ul class="tree">';
 
-            if     ( typeof SubDir              === 'undefined' ) HTML += ScanningLine;
-            else if( Object.keys(SubDir).length ==  0           ) HTML += NoneLine;
-            else                                                  HTML += ServTable(IF,Dev);
+            if     ( !this.Scanned                         ) HTML += ScanningLine;
+            else if( Object.keys(this.SubDir).length ==  0 ) HTML += NoneLine;
+            else {
+                for (const Entry of Object.keys(this.SubDir).sort())
+                    HTML += this.SubDir[Entry].DirLine();
+                }
 
-            HTML += "</li>";
-            });
+            HTML += "</ul>";
+            return HTML;
+            }
 
-        HTML += "</ul>";
-
-        return HTML;
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // ServTable - Return HTML of Services table for specific interface and device
+    // IFDir - Interface directory
     //
-    // Inputs:  IFace of interest
-    //          Dev   of interest
-    //
-    // Outputs: Stringified HTML code for Services table for device
-    //
-    function ServTable(IF,Dev) {
+    class IFDir extends TreeDir {
 
-        var HTML = '<ul>';
+        constructor(Dir,Parent) {
+            super("IF","I",Dir.IFace,Dir,Dir.Devs,DevDir,Parent);
+            }
 
-        Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services).forEach(function (Serv) { 
-            var Dir    = BLEInfo.IFaces[IF].Devs[Dev].Services[Serv];
-            var SubDir = Dir.Chars;
-
-            //
-            // <input type="checkbox" $OPEN id="$HTMLIDInput" onclick="Toggle()" />
-            // <label class="tree_label" for="$HTMLIDInput">$DIR</label>';
-            //
-            HTML += '<li>';
-            HTML += DirLine.replaceAll("$OPEN"  ,Dir.Open ? "checked" : "")
-                           .replaceAll("$DIR"   ,"Service: " + Serv)
-                           .replaceAll("$HTMLID",Dir.HTMLID);
-
-            if     ( typeof SubDir              === 'undefined' ) HTML += ScanningLine;
-            else if( Object.keys(SubDir).length ==  0           ) HTML += NoneLine;
-            else                                                  HTML += CharTable(IF,Dev,Serv);
-
-            HTML += "</li>";
-            });
-
-        HTML += "</ul>";
-
-        return HTML;
+        ServerScan() {
+            ServerCommand("ScanDevs",this.Name);
+            }
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // CharTable - Return HTML of characteristics table for specific interface
+    // DevDir - Device directory
     //
-    // Inputs:  IFace   of interest
-    //          Dev     of interest
-    //          Service of interest
+    class DevDir extends TreeDir {
+
+        constructor(Dir,Parent) {
+            super("Dev","D",Dir.ID,Dir,Dir.Services,ServDir,Parent);
+            }
+
+        ServerScan() {
+            ServerCommand("ScanServices",this.Parent.Name,
+                                         this.Name);
+            }
+        }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // Outputs: Stringified HTML code for Characteristics table for device
+    // ServDir - Service directory
     //
-    function CharTable(IF,Dev,Serv) {
+    class ServDir extends TreeDir {
 
-        var HTML = '<ul>';
+        constructor(Dir,Parent) {
+            super("Serv","S",Dir.UUID,Dir,Dir.Chars,CharDir,Parent);
+            }
 
-        Object.keys(BLEInfo.IFaces[IF].Devs[Dev].Services[Serv]).forEach(function (Char) { 
+        ServerScan() {
+            ServerCommand("ScanChars",this.Parent.Parent.Name,
+                                      this.Parent.Name,
+                                      this.Name);
+            }
+        }
 
-            var Dir    = BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars[Char];
-            var SubDir = Dir.Values;
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // CharDir - Characteristic directory
+    //
+    class CharDir extends TreeDir {
 
-            //
-            // <input type="checkbox" $OPEN id="$HTMLIDInput" onclick="Toggle()" />
-            // <label class="tree_label" for="$HTMLIDInput">$DIR</label>';
-            //
-            HTML += '<li>';
-            HTML += DirLine.replaceAll("$OPEN",Dir.Open ? "checked" : "")
-                           .replaceAll("$DIR" ,"Char: " + Char)
-                           .replaceAll("$HTMLID",Dir.HTMLID);
+        constructor(Dir,Parent) {
+            super("Char","C",Dir.Handle,Dir,Dir.Values,ValueDir,Parent);
+            }
 
-//            if     ( typeof SubDir              === 'undefined' ) HTML += ScanningLine;
-//            else if( Object.keys(SubDir).length ==  0           ) HTML += NoneLine;
-//            else                                                  HTML += CharTable(IF,Dev,Serv);
+        ServerScan() {
+            ServerCommand("GetValue",this.Parent.Parent.Parent.Name,
+                                     this.Parent.Parent.Name,
+                                     this.Parent.Name,
+                                     this.Name);
+            }
+        }
 
-            HTML += "</li>";
-            });
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // ValueDir - Value directory
+    //
+    class ValueDir extends TreeDir {
 
-        HTML += "</ul>";
-
-        return HTML;
+        constructor(Dir,Parent) {
+            super("Val","V","Value",Dir,{},0,Parent);
+            }
         }

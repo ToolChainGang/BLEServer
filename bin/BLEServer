@@ -56,8 +56,8 @@
 ##                         ->{$UUID}                   # UUID of service               (ex: "00001801-0000-1000-8000-00805f9b34fb")
 ##                             ->{UUID}                # Service UUID                  (same as hash key)
 ##                             ->{Service}             # First 8 hex digits of UUID    (ex: "00001801")
-##                             ->{HDStart}             # Start of characteristics
-##                             ->{HDEnd}               # End   of characteristics
+##                             ->{HStart}              # Start of characteristics
+##                             ->{HEnd}                # End   of characteristics
 ##                             ->{Chars}               # List of available characteristics
 ##                                 ->{$Char}           # Handle for this char          (ex: "0002")
 ##                                     ->{Handle}      # Handle                        (same as hash key)
@@ -326,12 +326,16 @@ sub WebRequest {
         my $Dev   = $Request->{Arg2};
         my $Serv  = $Request->{Arg3};
 
-        Message("**** BLEServer: ScanChars($IFace,$Dev,$Serv)")
-            if $Verbose;
-
         $Request->{Error} = ValidAccess($IFace,$Dev,$Serv);
 
-        $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev} = GetBLEChars($IFace,$Dev,$Serv,$BLEInfo->{Timeout})
+        my $Dir    = $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev}{Services}{$Serv};
+        my $HStart = "0x$Dir->{HStart}";
+        my $HEnd   = "0x$Dir->{HEnd}";
+
+        Message("**** BLEServer: ScanChars($IFace,$Dev,${Serv}[$HStart .. $HEnd)]")
+            if $Verbose;
+
+        $Dir->{Chars} = GetBLEChars($IFace,$Dev,$HStart,$HEnd,$BLEInfo->{Timeout})
             if $Request->{Error} eq $NoError;
         }
 

@@ -12,7 +12,7 @@ body {
 /*    margin-left:    4em;*/
   margin: 30px;
   font-family: sans-serif;
-
+/*font-family: monospace;*/
     }
 
 .PageDiv {
@@ -33,21 +33,18 @@ body {
  *
  * Tree styles
  */
-
-/* ————————————————————–
-  Tree core styles
-*/
 ol,ul { list-style: none }
 
-.tree { margin: 1em; }
+
+
+.tree { margin:     1em; }
 
 .tree input {
   position: absolute;
   clip: rect(0, 0, 0, 0);
   }
 
-.tree input ~ ul { display: none; }
-
+.tree input         ~ ul { display: none; }
 .tree input:checked ~ ul { display: block; }
 
 /* ————————————————————–
@@ -72,29 +69,28 @@ ol,ul { list-style: none }
   background: WhiteSmoke;
   }
 
-label.tree_label { cursor: pointer; }
-
+label.tree_label       { cursor: pointer; }
 label.tree_label:hover { color: #666; }
 
 /* ————————————————————–
   Tree expanded icon
 */
 label.tree_label:before {
-  background: #000;
-  color: WhiteSmoke;
-  position: relative;
-  z-index: 1;
-  float: left;
-  margin: 0 1em 0 -2em;
-  width: 1em;
-  height: 1em;
-  border-radius: 1em;
-  content: '+';
-  text-align: center;
-  line-height: .9em;
-  }
+    background:     Black;
+    color:          WhiteSmoke;
+    position:       relative;
+    z-index:        1;
+    float:          left;
+    margin:         0 1em 0 -2em;
+    width:          1em;
+    height:         1em;
+    border-radius:  1em;
+    text-align:     center;
+    line-height:    .9em;
+    }
 
-:checked ~ label.tree_label:before { content: '–'; }
+:not(:checked) ~ label.tree_label:before { content: '+'; }
+:checked       ~ label.tree_label:before { content: '–'; }
 
 /* ————————————————————–
   Tree branches
@@ -137,18 +133,18 @@ label.tree_label:after { border-bottom: 0; }
   }
 
 .tree li:last-child:before {
-  height: 1em;
-  bottom: auto;
-  }
+    height:     1em;
+    bottom:     auto;
+    }
 
 .tree > li:last-child:before { display: none; }
 
-.tree_custom {
-  display: block;
-  background: #eee;
-  padding: 1em;
-  border-radius: 0.3em;
-}
+/* .tree_custom { */
+/*   display: block; */
+/*   background: #eee; */
+/*   padding: 1em; */
+/*   border-radius: 0.3em; */
+/* } */
 
 /***********************************************************************
  *
