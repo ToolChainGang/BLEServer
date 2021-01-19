@@ -332,7 +332,7 @@ sub WebRequest {
         my $HStart = "0x$Dir->{HStart}";
         my $HEnd   = "0x$Dir->{HEnd}";
 
-        Message("**** BLEServer: ScanChars($IFace,$Dev,${Serv}[$HStart .. $HEnd)]")
+        Message("**** BLEServer: ScanChars($IFace,$Dev,${Serv}[$HStart .. $HEnd])")
             if $Verbose;
 
         $Dir->{Chars} = GetBLEChars($IFace,$Dev,$HStart,$HEnd,$BLEInfo->{Timeout})

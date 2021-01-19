@@ -10,9 +10,8 @@ body {
     background-color:   WhiteSmoke;
     font-size:      16px;
 /*    margin-left:    4em;*/
-  margin: 30px;
-  font-family: sans-serif;
-/*font-family: monospace;*/
+    margin: 30px;
+    font-family: sans-serif;
     }
 
 .PageDiv {
@@ -50,15 +49,24 @@ ol,ul { list-style: none }
 /* ————————————————————–
   Tree rows
 */
+
+/* .tree li { */
+/*   line-height: 1.2; */
+/*   position: relative; */
+/*   padding: 0 0 1em 1em; */
+/*   } */
+
+/* .tree ul li { padding: 1em 0 0 1em; } */
+/* .tree > li:last-child { padding-bottom: 0; } */
+
 .tree li {
   line-height: 1.2;
   position: relative;
   padding: 0 0 1em 1em;
   }
 
-.tree ul li { padding: 1em 0 0 1em; }
-
-.tree > li:last-child { padding-bottom: 0; }
+.tree ul li         { padding: 0 0 0 1em; }
+.tree li:last-child { padding-bottom: 0.5em; }
 
 /* ————————————————————–
   Tree labels
@@ -70,7 +78,7 @@ ol,ul { list-style: none }
   }
 
 label.tree_label       { cursor: pointer; }
-label.tree_label:hover { color: #666; }
+label.tree_label:hover { color : #666;    }
 
 /* ————————————————————–
   Tree expanded icon
@@ -97,7 +105,7 @@ label.tree_label:before {
 */
 .tree li:before {
   position: absolute;
-  top: 0;
+  top: -.57em;
   bottom: 0;
   left: -.5em;
   display: block;
@@ -139,17 +147,23 @@ label.tree_label:after { border-bottom: 0; }
 
 .tree > li:last-child:before { display: none; }
 
-/* .tree_custom { */
-/*   display: block; */
-/*   background: #eee; */
-/*   padding: 1em; */
-/*   border-radius: 0.3em; */
-/* } */
-
 /***********************************************************************
  *
  * Other pages
  */
+
+.Addr {
+    font-family:    monospace;
+    }
+
+.Name {
+    color:          Blue;
+    }
+
+.UUID {
+    font-family:    monospace;
+    }
+
 .LeftIndent {
     width:          2em;
     }

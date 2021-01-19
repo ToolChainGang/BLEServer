@@ -28,12 +28,12 @@
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// BLEInfo                                             # Data supplied by this server
+// BLEInfo                                             # Data supplied by the server
 //     ->{Timeout}                                     # Timeout in seconds for commands (DEFAULT: 10)
 //     ->{Hostname}                                    # System name (from /etc/hostname)
 //     ->{IFaces}                                      # Available BLE interfaces
-//         ->{$IF}                                     # Interface to scan     (ex: "hci0")
-//             ->{IFace  }                             # Name of interface     (same as hash key)
+//         ->{$IF}                                     # Interface to scan             (ex: "hci0")
+//             ->{IFace  }                             # Name of interface             (same as hash key)
 //             ->{Address}                             # Address of interface
 //             ->{Running}                             # TRUE if up and running
 //             ->{Devs}                                # Scanned devices
@@ -55,6 +55,17 @@
 //                                     ->{UUID}        # Full UUID of characteristic   (ex: "00001801-0000-1000-8000-00805f9b34fb")
 //                                     ->{Service}     # First 8 digits of char UUID   (ex: "00001801")
 //                                     ->{Values}      # List of seen values
+//
+// BLETree              # Info tracking one directory item
+//      .Type           # Text type of directory object                     (ex: "IF")
+//      .Prefix         # Char prefix to make HTML compatible ID from name  (ex: "I" for IFace)
+//      .Name           # Actual dir name                                   (ex: "hci0")
+//      .Dir            # Entry in BLEInfo that describes this dir          (ex: BLEInfo.IFaces.{"hci0"})
+//      .Parent         # Pointer to parent object in BLETree
+//      .HTMLID         # Prefix plus name, for HTML ID's                   (ex: "Ihci0")
+//      .Open           # T/F based on checkbox open/closed
+//      .Scanned        # T if we ever asked server to scan
+//      .SubDir         # If scanned, subdir of TreeDir objects
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -121,13 +132,14 @@
 //                console.log(BLEInfo);
 
                 BLEInfo = ConfigData.State;
+                BLETree = new BLEDir(BLEInfo);
 
                 HostnameElements = document.getElementsByClassName("Hostname");
                 for (i = 0; i < HostnameElements.length; i++) {
                     HostnameElements[i].innerHTML = BLEInfo.Hostname;
                     };
 
-                DisplayBLEInfo();
+                DisplayBLETree();
                 GotoPage("MainPage");
                 ServerCommand("ScanIFs");
                 return;
@@ -140,7 +152,8 @@
 //                console.log("Msg: "+Event.data);
 
                 BLEInfo = ConfigData.State;
-                DisplayBLEInfo();
+                BLETree = new BLEDir(BLEInfo);
+                DisplayBLETree();
                 return;
                 }
 
@@ -202,21 +215,19 @@
     // Outputs: None. Open is changed in place.
     //
     function Toggle(self) {
-        var HTMLID  = self.id;
+        var HTMLID = self.id;
 
         BLETree.Find(HTMLID).Toggle();
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // DisplayBLEInfo - Display the BLE info tree
+    // DisplayBLETree - Display the BLE info tree
     //
-    function DisplayBLEInfo() {
-        var HTML;
+    function DisplayBLETree() {
+console.log(BLETree);
 
-        HTML = BLETree.DirLine();
-
-        document.getElementById("IFTable2").innerHTML = HTML;
+        document.getElementById("IFTable").innerHTML = BLETree.DirLine();
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -273,8 +284,8 @@
                                            .replaceAll("$HTMLID",this.HTMLID);
 
             HTML += "<ul>"
-            if     ( !this.Scanned                         ) HTML += ScanningLine;
-            else if( Object.keys(this.SubDir).length ==  0 ) HTML += NoneLine;
+            if     ( !this.Scanned                         ) HTML += TreeDir.ScanningLine;
+            else if( Object.keys(this.SubDir).length ==  0 ) HTML += TreeDir.NoneLine;
             else {
                 for (const Entry of Object.keys(this.SubDir).sort())
                     HTML += this.SubDir[Entry].DirLine();
@@ -326,6 +337,16 @@
                 this.ServerScan();
             }
 
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        //
+        // AddrHTML - Format a BLE device address
+        // UUIDHTML - Format a UUID
+        // NameHTML - Format a device name
+        //
+        AddrHTML(Arg) { return '<span class="Addr">' + Arg + "</span>"; }
+        UUIDHTML(Arg) { return '<span class="UUID">' + Arg + "</span>"; }
+        NameHTML(Arg) { return '<span class="Name">' + Arg + "</span>"; }
+
         //
         // Directory list line
         //
@@ -345,6 +366,11 @@
         static NoneLine = '\
             <ul><li><span class="tree_label">None.</span></li></ul>';
 
+        //
+        // Span with non-proportional text
+        //
+        static MonoSpan = '\
+            <span class="Mono">$DATA</span>';
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -370,8 +396,8 @@
 
             HTML += '<ul class="tree">';
 
-            if     ( !this.Scanned                         ) HTML += ScanningLine;
-            else if( Object.keys(this.SubDir).length ==  0 ) HTML += NoneLine;
+            if     ( !this.Scanned                         ) HTML += TreeDir.ScanningLine;
+            else if( Object.keys(this.SubDir).length ==  0 ) HTML += TreeDir.NoneLine;
             else {
                 for (const Entry of Object.keys(this.SubDir).sort())
                     HTML += this.SubDir[Entry].DirLine();
@@ -380,7 +406,6 @@
             HTML += "</ul>";
             return HTML;
             }
-
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -412,6 +437,10 @@
             ServerCommand("ScanServices",this.Parent.Name,
                                          this.Name);
             }
+
+        DataLine() {
+            return this.AddrHTML(this.Name) + ": " + this.NameHTML(this.Dir.Name);
+            }
         }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -428,6 +457,10 @@
             ServerCommand("ScanChars",this.Parent.Parent.Name,
                                       this.Parent.Name,
                                       this.Name);
+            }
+
+        DataLine() {
+            return this.UUIDHTML(this.Name);
             }
         }
 
