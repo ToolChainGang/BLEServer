@@ -33,9 +33,6 @@ body {
  * Tree styles
  */
 ol,ul { list-style: none }
-
-
-
 .tree { margin:     1em; }
 
 .tree input {
@@ -49,16 +46,6 @@ ol,ul { list-style: none }
 /* ————————————————————–
   Tree rows
 */
-
-/* .tree li { */
-/*   line-height: 1.2; */
-/*   position: relative; */
-/*   padding: 0 0 1em 1em; */
-/*   } */
-
-/* .tree ul li { padding: 1em 0 0 1em; } */
-/* .tree > li:last-child { padding-bottom: 0; } */
-
 .tree li {
   line-height: 1.2;
   position: relative;
@@ -110,7 +97,7 @@ label.tree_label:before {
   left: -.5em;
   display: block;
   width: 0;
-  border-left: 1px solid #777;
+  border-left: 1px solid Black;
   content: "";
   }
 
@@ -121,20 +108,20 @@ label.tree_label:before {
   display: block;
   height: 0.5em;
   width: 1em;
-  border-bottom: 1px solid #777;
-  border-left: 1px solid #777;
-  border-radius: 0 0 0 .3em;
+  border-bottom:    1px solid Black;
+  border-left:      1px solid Black;
+  border-radius:    0 0 0 .3em;
   content: '';
   }
 
 label.tree_label:after { border-bottom: 0; }
 
 :checked ~ label.tree_label:after {
-  border-radius: 0 .3em 0 0;
-  border-top: 1px solid #777;
-  border-right: 1px solid #777;
-  border-bottom: 0;
-  border-left: 0;
+  border-radius:    0 .3em 0 0;
+  border-top:       1px solid Black;
+  border-right:     1px solid Black;
+  border-bottom:    0;
+  border-left:      0;
   bottom: 0;
   top: 0.5em;
   height: auto;
@@ -152,16 +139,12 @@ label.tree_label:after { border-bottom: 0; }
  * Other pages
  */
 
-.Addr {
+.Addr, .Name, .UUID, .Hnd, Value {
     font-family:    monospace;
     }
 
 .Name {
     color:          Blue;
-    }
-
-.UUID {
-    font-family:    monospace;
     }
 
 .LeftIndent {

@@ -56,6 +56,7 @@
 ##                         ->{$UUID}                   # UUID of service               (ex: "00001801-0000-1000-8000-00805f9b34fb")
 ##                             ->{UUID}                # Service UUID                  (same as hash key)
 ##                             ->{Service}             # First 8 hex digits of UUID    (ex: "00001801")
+##                             ->{GATTInfo}            # GATT info of service
 ##                             ->{HStart}              # Start of characteristics
 ##                             ->{HEnd}                # End   of characteristics
 ##                             ->{Chars}               # List of available characteristics
@@ -65,6 +66,12 @@
 ##                                     ->{Properties}  # R/W, etc
 ##                                     ->{UUID}        # Full UUID of characteristic   (ex: "00001801-0000-1000-8000-00805f9b34fb")
 ##                                     ->{Service}     # First 8 digits of char UUID   (ex: "00001801")
+##                                     ->{GATTInfo}    # GATT info of service
+##
+##  {GATTINFO}->
+##      {Type}              # Type of GATT entry for UUID
+##      {ID}                # UUID service (First 8 digits of UUID)
+##      {Name}              # Name of GATT entry (ex: "Device Information")
 ##
 ## A device scan can return several names for any device, including the string "(unknown)". The library attempts
 ##   to choose the best human-readable name from the list and returns it as "Name", but includes the array "Names"
@@ -122,7 +129,7 @@ use Site::RasPiUtils;
 
 our $SERVER_PORT     = 2021;
 
-our $DEFAULT_TIMEOUT = 10;      # Timeout when waiting for any command
+our $DEFAULT_TIMEOUT = 10;      # Timeout when waiting for any command, in seconds
 
 our $BLEInfo;                   # Info given to web page
 
@@ -146,8 +153,8 @@ my $Verbose = 0;
 $Verbose = 1
     if defined $ARGV[0] and $ARGV[0] eq "-v";
 
-$BLEInfo = { Timeout  => $DEFAULT_TIMEOUT,
-             Hostname => GetHostname(),
+$BLEInfo = { Timeout   => $DEFAULT_TIMEOUT,
+             Hostname  => GetHostname(),
              };
 
 # print Data::Dumper->Dump([$BLEInfo],["BLEInfo"]);
@@ -190,43 +197,6 @@ sub ConnectionRequest {
 
 ########################################################################################################################
 ########################################################################################################################
-#
-# UpdateClients - Updat all existing clients with new information
-#
-# Inputs:      Error message to send
-#
-# Outputs:     None. Connected clients are sent a new BLEInfo struct
-#
-sub UpdateClients {
-
-    my $Server  = GetServer();
-    my $Request = { Type => "GetBLEInfo", State => $BLEInfo, Error => $NoError };
-
-    SendResponse($_,$Request)
-        for $Server->connections();
-    }
-
-
-########################################################################################################################
-########################################################################################################################
-#
-# Data - Handle data notifications
-#
-# Inputs:      None.
-#
-# Outputs:     None. Connected clients are sent a new BLEInfo struct
-#
-sub Data {
-
-    Message("**** BLEServer: Data!");
-
-    GetBLEValues();
-    UpdateClients();
-    }
-
-
-########################################################################################################################
-########################################################################################################################
 # 
 #  WebRequest - Process incoming web page requests
 # 
@@ -262,17 +232,15 @@ sub WebRequest {
     return Message("**** BLEServer: No request type: ($JSONText)")
         unless length $Request->{Type};
 
+    $Request->{Error} = $NoError;   # Default for commands
+
     #
-    # GetBLEInfo - Return the BLE information
+    # GetBLEInfo - Return the BLE server information
     #
     if( $Request->{Type} eq "GetBLEInfo" ) {
         Message("**** BLEServer: GetBLEInfo()")
             if $Verbose;
-        $Request->{ Error} = $NoError;
-        $BLEInfo->{IFaces} = undef;
-        #
-        # Returning $BLEInfo is the default (see below)
-        #
+        $Request->{State} = $BLEInfo;
         }
 
     #
@@ -283,8 +251,7 @@ sub WebRequest {
         Message("**** BLEServer: ScanIFs()")
             if $Verbose;
 
-        $Request->{ Error} = $NoError;
-        $BLEInfo->{IFaces} = GetBLEIFaces($BLEInfo->{Timeout});
+        $Request->{State} = GetBLEIFaces($BLEInfo->{Timeout});
         }
 
     #
@@ -296,10 +263,7 @@ sub WebRequest {
         Message("**** BLEServer: ScanDevs($IFace)")
             if $Verbose;
 
-        $Request->{Error} = ValidAccess($IFace);
-
-        $BLEInfo->{IFaces}{$IFace}{Devs} = GetBLEDevs($IFace,$BLEInfo->{Timeout})
-            if $Request->{Error} eq $NoError;
+        $Request->{State} = GetBLEDevs($IFace,$BLEInfo->{Timeout});
         }
 
     #
@@ -312,31 +276,48 @@ sub WebRequest {
         Message("**** BLEServer: ScanServices($IFace,$Dev)")
             if $Verbose;
 
-        $Request->{Error} = ValidAccess($IFace,$Dev);
-
-        $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev}{Services} = GetBLEServices($IFace,$Dev,$BLEInfo->{Timeout})
-            if $Request->{Error} eq $NoError;
+        $Request->{State} = GetBLEServices($IFace,$Dev,$BLEInfo->{Timeout});
         }
 
     #
     # ScanChars - Scan for service characteristics
     #
     elsif( $Request->{Type} eq "ScanChars" ) {
-        my $IFace = $Request->{Arg1};
-        my $Dev   = $Request->{Arg2};
-        my $Serv  = $Request->{Arg3};
+        my $IFace  = $Request->{Arg1};
+        my $Dev    = $Request->{Arg2};
+        my $HStart = $Request->{Arg3};
+        my $HEnd   = $Request->{Arg4};
 
-        $Request->{Error} = ValidAccess($IFace,$Dev,$Serv);
-
-        my $Dir    = $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev}{Services}{$Serv};
-        my $HStart = "0x$Dir->{HStart}";
-        my $HEnd   = "0x$Dir->{HEnd}";
-
-        Message("**** BLEServer: ScanChars($IFace,$Dev,${Serv}[$HStart .. $HEnd])")
+        Message("**** BLEServer: ScanChars($IFace,$Dev,$HStart,$HEnd)")
             if $Verbose;
 
-        $Dir->{Chars} = GetBLEChars($IFace,$Dev,$HStart,$HEnd,$BLEInfo->{Timeout})
-            if $Request->{Error} eq $NoError;
+        $Request->{State} = GetBLEChars($IFace,$Dev,"0x$HStart","0x$HEnd",$BLEInfo->{Timeout});
+        }
+
+    #
+    # GetCharValue - Return value for specified characteristic
+    #
+    elsif( $Request->{Type} eq "GetBLECharValue" ) {
+        my $IFace = $Request->{Arg1};
+        my $Dev   = $Request->{Arg2};
+        my $VHnd  = $Request->{Arg3};
+
+        Message("**** BLEServer: GetCharValue($IFace,$Dev,$VHnd)")
+            if $Verbose;
+
+        $Request->{State} = GetBLECharValue($IFace,$Dev,$VHnd,$BLEInfo->{Timeout});
+        }
+
+    #
+    # GetGATTInfo - Return GATT info for specified UUID
+    #
+    elsif( $Request->{Type} eq "GetGATTInfo" ) {
+        my $UUID = $Request->{Arg1};
+
+        Message("**** BLEServer: GetGATTInfo($UUID)")
+            if $Verbose;
+
+        $Request->{State} = GetGATTDesc($UUID);
         }
 
     #
@@ -351,90 +332,5 @@ sub WebRequest {
     #
     # Pack up the error message and return the struct to the caller
     #
-    $Request->{State} = $BLEInfo;
-    SendResponse($Conn,$Request);
-    }
-
-
-########################################################################################################################
-########################################################################################################################
-#
-# ValidAccess - Validate BLEInfo member access args
-#
-# Inputs:   IFace
-#           Dev
-#           Service
-#           Char
-#
-# Outputs:  Error message, if defective access
-#           $NoError if access OK
-#
-# NOTE: Only the arguments supplied are checked; IOW, this function can be used to check
-#         1 .. N arguments of the subset below in order.
-#
-sub ValidAccess {
-
-    my $IFace = shift;
-
-    return "No interface supplied"
-        unless defined $IFace;
-
-    return "No such interface ($IFace)"
-        unless defined $BLEInfo->{IFaces}{$IFace};
-
-    ####################################################################################################################
-
-    my $Dev = shift;
-
-    return $NoError
-        unless defined $Dev;
-
-    return "No such device ($IFace::$Dev)"
-        unless defined $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev};
-
-    ####################################################################################################################
-
-    my $Service = shift;
-
-    return $NoError
-        unless defined $Service;
-
-    return "No such Service ($IFace::$Dev/$Service)"
-        unless defined $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev}{Services}{$Service};
-
-    ####################################################################################################################
-
-    my $Char = shift;
-
-    return $NoError
-        unless defined $Char;
-
-    return "No such Characteristic ($IFace::$Dev/$Service/$Char)"
-        unless defined $BLEInfo->{IFaces}{$IFace}{Devs}{$Dev}{Services}{$Service}{Chars}{$Char};
-
-    return $NoError;
-    }
-
-
-########################################################################################################################
-########################################################################################################################
-#
-# ReqError - Set error and return response
-#
-# Inputs:   Connection  - Connection to client
-#           Request     - Request from client
-#           Message     - Error message to return
-#
-# Outputs:  None.
-#
-sub ReqError {
-    my $Conn    = shift;
-    my $Request = shift;
-    my $Message = shift;
-
-    Message($Message);
-
-    $Request->{Error} = $Message;
-    $Request->{State} = $BLEInfo;
     SendResponse($Conn,$Request);
     }

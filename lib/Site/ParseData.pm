@@ -23,6 +23,7 @@
 ##      ->{Sections}                    Hash of sections by name
 ##          ->{$SecName}
 ##              ->{LineNo}              Line number of section starter
+##              ->{_Lines}              Input lines parsed for this section
 ##              ->{Vars}                Variables found in section
 ##                  ->{$Var}            Variables found in section
 ##                      ->{Value}       Value of variable
@@ -122,6 +123,7 @@ use constant AddGlobal      => 3;
 use constant SkipLine       => 4;
 use constant AddQVar        => 5;
 use constant PushVar        => 6;
+use constant SaveLines      => 7;
 
 use constant CommentHash    => 1;       # Commented by prepending hash
 use constant CommentSemi    => 2;       # Commented by prepending semicolon
@@ -265,13 +267,22 @@ sub Parse {
     my $GlobalSection  = $self->{Sections}{$GLOBAL_SECTION};
     my $CurrentSection = $GlobalSection;
 
-    my $LineNo = -1;
+    my $SaveLines = 0;
+    my $LineNo    = -1;
     foreach my $Line (@{$self->{Lines}}) {
 
         chomp $Line;
         $LineNo++;
 
         foreach my $Match (@{$self->{Matches}}) {
+
+            #
+            # SaveLines - Start saving section lines for each section
+            #
+            if( $Match->{Action} == SaveLines ) {
+                $SaveLines = 1;
+                next;
+                }
 
             next
                 unless( $Line =~ /$Match->{RegEx}/ );
@@ -295,7 +306,8 @@ sub Parse {
             # StartSection - Start a new section with specified name
             #
             if( $Match->{Action} == StartSection ) {
-                $self->{Sections}{$Name} = { LineNo => $LineNo, Vars => {} };
+                $self->{Sections}{$Name} = { LineNo => $LineNo, Vars => {} }
+                    if !defined $self->{Sections}{$Name};
                 $CurrentSection = $self->{Sections}{$Name};
                 next;
                 }
@@ -343,6 +355,12 @@ sub Parse {
                 die "ParseData: Unknown parse action ($Match->{Action})";
                 }
             }
+
+        #
+        # Save the parsed lines of each section, if the "SaveLines" flag is set.
+        #
+        push @{$CurrentSection->{_Lines}},$Line
+            if $SaveLines;
         }
 
     $self->{Parsed} = 1;
@@ -381,6 +399,12 @@ sub AsHash {
                 $CurrentSection->{$Var} = $self->{Sections}{$Section}{Vars}{$Var}{Value};
                 }
             }        
+
+        #
+        # Add _Lines entry, if we saved them
+        #
+        $CurrentSection->{_Lines} = $self->{Sections}{$Section}{_Lines}
+            if defined $self->{Sections}{$Section}{_Lines};
         }
 
     return $Hash;

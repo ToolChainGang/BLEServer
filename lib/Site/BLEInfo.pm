@@ -35,9 +35,9 @@
 ##                          ($Timeout=10))  Return a hash of BLE services for device
 ##          ->{$UUID}                           UUID of service         (ex: "00001801-0000-1000-8000-00805f9b34fb")
 ##              ->{UUID}                            Service ID          (same as hash key)
-##              ->{Service}                         First 8 hex digits of UUID
 ##              ->{HStart}                          Start of characteristics
 ##              ->{HEnd}                            End   of characteristics
+##              ->{GATT}                            GATT info for UUID
 ##
 ##      GetBLEChars($IFace,$Dev,$HStart,$HEnd
 ##                          ($Timeout=10))  Return a hash of characteristics
@@ -46,7 +46,15 @@
 ##              ->{VHandle}                         Handle for value
 ##              ->{Properties}                      R/W, etc
 ##              ->{UUID}                            Full UUID of characteristic
-##              ->{Service}                         First 8 digits of UUID
+##
+##      GetBLECharValue($IFace,$Dev,$VHnd
+##                          ($Timeout=10))  Return value of specific BLE characteristic
+##          ->{Value}                           String value of data
+##          ->{BValue}[]                        Binary value of data (bytes)
+##          ->{UValue}                          Binary value of data expressed as UTF8 (string)
+##          ->{UValid}                          TRUE if UTF8 string is valid
+##
+##      GetBLECharPropInfo($Prop)           Convert char properties info to text format
 ##
 ########################################################################################################################
 ########################################################################################################################
@@ -83,11 +91,14 @@ use Carp;
 use File::Slurp qw(read_file write_file);
 
 use Site::ParseData;
+use Site::GATTTable;
 
 our @EXPORT  = qw(&GetBLEIFaces
                   &GetBLEDevs
                   &GetBLEServices
                   &GetBLEChars
+                  &GetBLECharValue
+                  &GetBLECharPropInfo
                   );          # Export by default
 
 ########################################################################################################################
@@ -98,7 +109,9 @@ our @EXPORT  = qw(&GetBLEIFaces
 ########################################################################################################################
 ########################################################################################################################
 
-our $DefaultTimeout   = 10;                 # Default timeout, in seconds
+our $DefaultTimeout = 10;                   # Default timeout, in seconds
+
+our $PropBitChars   = "eainwcrB";           # Chars for bits in characteristic properties field
 
 our $H2Match = "[[:xdigit:]]{2}";           # Match exactly 2  hex digits
 our $H4Match = "[[:xdigit:]]{4}";           # Match exactly 4  hex digits
@@ -123,6 +136,7 @@ our $UUIDMatch = "$H8Match-$H4Match-$H4Match-$H4Match-$HCMatch";
 # 	TX bytes:3511 acl:10 sco:0 commands:163 errors:0
 #
 our $IFaceMatches = [
+    {                                                                 Action => Site::ParseData::SaveLines    },
     {                    RegEx => qr/^(\w+\d+):\s*Type\s*/          , Action => Site::ParseData::StartSection },
     { Name => "IFace"  , RegEx => qr/^(\w+\d+):\s*Type\s*/          , Action => Site::ParseData::AddVar       },
     { Name => "Address", RegEx => qr/\s*Address:\s*($IDMatch)\s*ACL/, Action => Site::ParseData::AddVar       },
@@ -138,11 +152,19 @@ our $IFaceMatches = [
 # 58:2D:34:37:8D:DD MJ_HT_V1
 # D4:9D:C0:88:21:89 (unknown)
 #
-our $IDMatches = [
-    {                   RegEx => qr/^LE\sScan/        , Action => Site::ParseData::SkipLine },
-    {                   RegEx => qr/($IDMatch)\s(.*)$/, Action => Site::ParseData::PushVar  },
-    ];
 
+# our $IDMatches = [
+#     {                   RegEx => qr/^LE\sScan/        , Action => Site::ParseData::SkipLine },
+#     {                   RegEx => qr/($IDMatch)\s(.*)$/, Action => Site::ParseData::PushVar  },
+#     ];
+
+our $IDMatches = [
+    {                   RegEx => qr/^LE\sScan/      , Action => Site::ParseData::SkipLine     },
+    {                                                 Action => Site::ParseData::SaveLines    },
+    {                   RegEx => qr/($IDMatch)\s.*$/, Action => Site::ParseData::StartSection },
+    { Name => "ID"    , RegEx => qr/($IDMatch)\s.*$/, Action => Site::ParseData::AddVar       },
+    { Name => "Names" , RegEx => qr/$IDMatch\s(.*)$/, Action => Site::ParseData::PushVar      },
+    ];
 
 #
 # attr handle = 0x0001, end grp handle = 0x000b uuid: 00001800-0000-1000-8000-00805f9b34fb
@@ -152,11 +174,11 @@ our $IDMatches = [
 # attr handle = 0x0031, end grp handle = 0xffff uuid: 0000180f-0000-1000-8000-00805f9b34fb
 #
 our $ServiceMatches = [
+    {                                                                Action => Site::ParseData::SaveLines    },
     {                    RegEx => qr/uuid:\s($UUIDMatch)$/         , Action => Site::ParseData::StartSection },
     { Name => "UUID"   , RegEx => qr/uuid:\s($UUIDMatch)$/         , Action => Site::ParseData::AddVar       },
     { Name => "HStart",  RegEx => qr/attr handle = 0x($H4Match)/   , Action => Site::ParseData::AddVar       },
     { Name => "HEnd"  ,  RegEx => qr/end grp handle = 0x($H4Match)/, Action => Site::ParseData::AddVar       },
-    { Name => "Service", RegEx => qr/uuid:\s($H8Match)/            , Action => Site::ParseData::AddVar       },
     ];
 
 #
@@ -167,14 +189,20 @@ our $ServiceMatches = [
 # handle = 0x000a, char properties = 0x02, char value handle = 0x000b, uuid = 00002a04-0000-1000-8000-00805f9b34fb
 #
 our $CharMatches = [
+    {                                                                     Action => Site::ParseData::SaveLines    },
     {                       RegEx => qr/handle\s=\s0x($H4Match),/       , Action => Site::ParseData::StartSection },
     { Name => "Handle"    , RegEx => qr/handle\s=\s0x($H4Match),/       , Action => Site::ParseData::AddVar       },
     { Name => "Properties", RegEx => qr/properties\s=\s0x($H2Match),/   , Action => Site::ParseData::AddVar       },
     { Name => "VHandle"   , RegEx => qr/value\shandle\s=\s0x($H4Match),/, Action => Site::ParseData::AddVar       },
     { Name => "UUID"      , RegEx => qr/uuid\s=\s($UUIDMatch)$/         , Action => Site::ParseData::AddVar       },
-    { Name => "Service"   , RegEx => qr/uuid\s=\s($H8Match)-/           , Action => Site::ParseData::AddVar       },
     ];
 
+#
+# Characteristic value/descriptor: 4b 72 79 6f 2c 20 49 6e 63 2e
+#
+our $ValueMatches = [
+    { Name => "Value" , RegEx => qr#Characteristic\svalue/descriptor: (.*)$#, Action => Site::ParseData::AddVar },
+    ];
 
 
 ########################################################################################################################
@@ -215,20 +243,25 @@ sub GetBLEDevs {
     my $DevParse = Site::ParseData->new(Matches => $IDMatches);
     my $BLEDevs  = $DevParse->ParseCommand("sudo timeout -s SIGINT ${Timeout}s hcitool -i $IFace lescan");
 
+use Data::Dumper;
+print Data::Dumper->Dump([$BLEDevs],["${IFace}->{Devs}"]);
+
     #
     # The BLE scan will return multiple names for any device, including one or more '(unknown)' entries.
-    #   Select an appropriate name.
+    #   For this reason Names is an array of parsed values, and we select one of these names as the "Name".
     #
     foreach my $Dev (keys %{$BLEDevs}) {
         my $DevName = "";
 
-        foreach my $Name (@{$BLEDevs->{$Dev}}) {
+        foreach my $Name (@{$BLEDevs->{$Dev}{Names}}) {
             $DevName = $Name
                 if $DevName eq "" or $DevName eq "(unknown)";
             }
 
-        $BLEDevs->{$Dev} = { ID => $Dev, Name => $DevName, Names => [ @{$BLEDevs->{$Dev}} ] };
+        $BLEDevs->{$Dev}{Name} = $DevName;
         }
+
+    delete $BLEDevs->{_Lines};
 
 # use Data::Dumper;
 # print Data::Dumper->Dump([$BLEDevs],["${IFace}->{Devs}"]);
@@ -255,6 +288,15 @@ sub GetBLEServices {
 
     my $ServiceParse = Site::ParseData->new(Matches => $ServiceMatches);
     my $BLEServices  = $ServiceParse->ParseCommand("timeout -s SIGINT ${Timeout}s gatttool --adapter $IFace --device $Dev --primary");
+
+use Data::Dumper;
+print Data::Dumper->Dump([$BLEServices],["${IFace}->{$Dev}->{Services}"]);
+
+    #
+    # Add the GATT info for all services seen
+    #
+    $BLEServices->{$_}->{GATTInfo} = GetGATTDesc($BLEServices->{$_}{UUID})
+        foreach keys %{$BLEServices};
 
 # use Data::Dumper;
 # print Data::Dumper->Dump([$BLEServices],["${IFace}->{$Dev}->{Services}"]);
@@ -289,7 +331,76 @@ sub GetBLEChars {
 # use Data::Dumper;
 # print Data::Dumper->Dump([$BLEChars],["${Dev}->Chars[$HStart .. $HEnd]->{}"]);
 
+    #
+    # Add the GATT info for all services seen
+    #
+    foreach my $Char (keys %{$BLEChars}) {
+        $BLEChars->{$Char}->{GATTInfo} = GetGATTDesc       ($BLEChars->{$Char}{UUID});
+        $BLEChars->{$Char}->{PropInfo} = GetBLECharPropInfo($BLEChars->{$Char}{Properties});
+        }
+
+use Data::Dumper;
+print Data::Dumper->Dump([$BLEChars],["${Dev}->Chars[$HStart .. $HEnd]->{}"]);
+
     return $BLEChars;
+    }
+
+
+########################################################################################################################
+########################################################################################################################
+#
+# GetBLECharValue - Return value of specific BLE characteristic
+#
+# Inputs:   Interface to use
+#           Device to scan
+#           Characteristic handle
+#           Timeout for scan (DEFAULT: 10 secs)
+#
+# Outputs:  Hash with Value of characteristic
+#
+sub GetBLECharValue {
+    my $IFace   = shift;
+    my $Dev     = shift;
+    my $Char    = shift;
+    my $Timeout = shift // $DefaultTimeout;
+
+    my $ValueParse = Site::ParseData->new(Matches => $ValueMatches);
+    my $ValueHash  = $ValueParse->ParseCommand("timeout -s SIGINT ${Timeout}s gatttool --adapter $IFace --device $Dev --char-read -a 0x$Char");
+
+use Data::Dumper;
+print Data::Dumper->Dump([$ValueHash],["ValueHash"]);
+
+    $ValueHash->{ Value} =~ s/^\s+|\s+$//g;                                      # Trim spaces from both ends
+    $ValueHash->{BValue} = [ map { hex($_) } (split / /,$ValueHash->{ Value}) ]; # Binary octets array
+    $ValueHash->{UValue} = join '', map chr, @{$ValueHash->{BValue}};            # UTF8 conversion
+    $ValueHash->{UValid} = utf8::decode($ValueHash->{UValue});
+    $ValueHash->{TValue} = ToIEEE11073([reverse @{$ValueHash->{BValue}}]);       # Temperature data
+
+print Data::Dumper->Dump([$ValueHash],["ValueHash"]);
+
+    return $ValueHash;
+    }
+
+
+########################################################################################################################
+########################################################################################################################
+#
+# GetBLECharPropInfo - Return a text version of the char properties byte
+#
+# Inputs:   Byte to convert
+#
+# Outputs:  Stringified version of properties
+#
+sub GetBLECharPropInfo {
+    my $Prop = hex shift;
+    my $Info = "";
+
+    for( my $Bit = 0; $Bit < 8; $Bit++ ) {
+        if( $Prop & (1 << $Bit) ) { $Info = substr($PropBitChars,7-$Bit,1) . $Info; }
+        else                      { $Info = "." . $Info; }
+        }
+
+    return $Info;
     }
 
 

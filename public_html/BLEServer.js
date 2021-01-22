@@ -45,8 +45,9 @@
 //                         ->{$UUID}                   # UUID of service               (ex: "00001801-0000-1000-8000-00805f9b34fb")
 //                             ->{UUID}                # Service UUID                  (same as hash key)
 //                             ->{Service}             # First 8 hex digits of UUID    (ex: "00001801")
-//                             ->{HDStart}             # Start of characteristics
-//                             ->{HDEnd}               # End   of characteristics
+//                             ->{GATTInfo}            # GATT info of service
+//                             ->{HStart}              # Start of characteristics
+//                             ->{HEnd}                # End   of characteristics
 //                             ->{Chars}               # List of available characteristics
 //                                 ->{$Char}           # Handle for this char          (ex: "0002")
 //                                     ->{Handle}      # Handle                        (same as hash key)
@@ -55,6 +56,12 @@
 //                                     ->{UUID}        # Full UUID of characteristic   (ex: "00001801-0000-1000-8000-00805f9b34fb")
 //                                     ->{Service}     # First 8 digits of char UUID   (ex: "00001801")
 //                                     ->{Values}      # List of seen values
+//                                     ->{GATTInfo}    # GATT info of service
+//
+//  {GATTINFO}->
+//      {Type}              # Type of GATT entry for UUID
+//      {ID}                # UUID service       (First 8 digits of UUID)
+//      {Name}              # Name of GATT entry (ex: "Device Information")
 //
 // BLETree              # Info tracking one directory item
 //      .Type           # Text type of directory object                     (ex: "IF")
@@ -73,11 +80,12 @@
     var ConfigAddr   = "ws:" + ConfigSystem + ":2021";
 
     var ConfigSocket;
-    var ConfigData;
+    var ServerData;
 
     var WindowWidth;
     var WindowHeight;
 
+    var MaxValues = 5;      // Max char value history
     var BLEInfo;
     var BLETree;
 
@@ -114,54 +122,97 @@
     function ConfigConnect() {
         ConfigSocket = new WebSocket(ConfigAddr);
         ConfigSocket.onmessage = function(Event) {
-            ConfigData = JSON.parse(Event.data);
+            ServerData = JSON.parse(Event.data);
 
 //            console.log("Msg: "+Event.data);
 
-            if( ConfigData["Error"] != "No error." ) {
-                console.log("Error: "+ConfigData["Error"]);
-                console.log("Msg:   "+Event.data);
-                alert("Error: " + ConfigData["Error"]);
+            if( ServerData["Error"] != "No error." ) {
+                console.log("Error: " +ServerData["Error"]);
+                console.log("Msg:   ")
+                console.log(Event.data);
+                alert("Error: " + ServerData["Error"]);
                 return;
                 }
+
+//             console.log(ServerData);
 
             //
             // Most messages return a GPIOInfo struct, which updates the shown values
             //
-            if( ConfigData["Type"] == "GetBLEInfo" ) {
-//                console.log(BLEInfo);
-
-                BLEInfo = ConfigData.State;
-                BLETree = new BLEDir(BLEInfo);
+            if( ServerData["Type"] == "GetBLEInfo" ) {
+                BLEInfo = ServerData.State;
 
                 HostnameElements = document.getElementsByClassName("Hostname");
                 for (i = 0; i < HostnameElements.length; i++) {
                     HostnameElements[i].innerHTML = BLEInfo.Hostname;
                     };
 
-                DisplayBLETree();
+                DisplayNewBLETree();
                 GotoPage("MainPage");
                 ServerCommand("ScanIFs");
                 return;
                 }
 
-            if( ConfigData["Type"] == "ScanIFs"      ||
-                ConfigData["Type"] == "ScanDevs"     ||
-                ConfigData["Type"] == "ScanServices" ||
-                ConfigData["Type"] == "ScanChars"    ) {
-//                console.log("Msg: "+Event.data);
+            if( ServerData["Type"] == "ScanIFs" ) {
+                BLEInfo.IFaces = ServerData.State;
+                DisplayNewBLETree();
+                return;
+                }
 
-                BLEInfo = ConfigData.State;
-                BLETree = new BLEDir(BLEInfo);
-                DisplayBLETree();
+            if( ServerData["Type"] == "ScanDevs" ) {
+                var IF = ServerData.Arg1;
+
+                BLEInfo.IFaces[IF].Devs = ServerData.State;
+                DisplayNewBLETree();
+                return;
+                }
+
+
+            if( ServerData["Type"] == "ScanServices" ) {
+                var IF  = ServerData.Arg1;
+                var Dev = ServerData.Arg2;
+
+                BLEInfo.IFaces[IF].Devs[Dev].Services = ServerData.State;
+                DisplayNewBLETree();
+                return;
+                }
+
+            if( ServerData["Type"] == "ScanChars" ) {
+                var IF     = ServerData.Arg1;
+                var Dev    = ServerData.Arg2;
+                var HStart = ServerData.Arg3;
+                var HEnd   = ServerData.Arg4;
+                var Serv   = ServerData.Arg5;
+
+                BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars = ServerData.State;
+                DisplayNewBLETree();
+                return;
+                }
+
+            if( ServerData["Type"] == "GetBLECharValue" ) {
+                var IF   = ServerData.Arg1;
+                var Dev  = ServerData.Arg2;
+                var VHnd = ServerData.Arg3;
+                var Serv = ServerData.Arg4;
+                var Char = ServerData.Arg5;
+
+                var Dir  = BLEInfo.IFaces[IF].Devs[Dev].Services[Serv].Chars[Char];
+                if( !Dir.Values )
+                    Dir.Values = [];
+
+                Dir.Value  = ServerData.State;
+                Dir.Values.unshift(Dir.Value);
+                Dir.Values = Dir.Values.slice(0, MaxValues);
+
+                DisplayNewBLETree();
                 return;
                 }
 
             //
             // Unexpected messages
             //
-            console.log(ConfigData);
-            alert(ConfigData["Type"] + " received");
+            console.log(ServerData);
+            alert(ServerData["Type"] + " received");
             };
 
         ConfigSocket.onopen = function(Event) {
@@ -222,11 +273,12 @@
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // DisplayBLETree - Display the BLE info tree
+    // DisplayNewBLETree - Create and display a new BLE info tree
     //
-    function DisplayBLETree() {
-console.log(BLETree);
+    function DisplayNewBLETree() {
+        BLETree = new BLEDir(BLEInfo);
 
+// console.log(BLETree);
         document.getElementById("IFTable").innerHTML = BLETree.DirLine();
         }
 
@@ -244,6 +296,9 @@ console.log(BLETree);
             this.Parent = Parent;
 
             this.HTMLID = this.Prefix + this.Name;
+            if( Parent )
+                this.HTMLID += Parent.HTMLID;
+
             this.SetOpen();
 
             this.Scanned = false;
@@ -342,10 +397,14 @@ console.log(BLETree);
         // AddrHTML - Format a BLE device address
         // UUIDHTML - Format a UUID
         // NameHTML - Format a device name
+        // HndHTML  - Format a handle
+        // Value    - Format a Value
         //
-        AddrHTML(Arg) { return '<span class="Addr">' + Arg + "</span>"; }
-        UUIDHTML(Arg) { return '<span class="UUID">' + Arg + "</span>"; }
-        NameHTML(Arg) { return '<span class="Name">' + Arg + "</span>"; }
+        AddrHTML(Arg)  { return '<span class="Addr">'  + Arg + "</span>"; }
+        UUIDHTML(Arg)  { return '<span class="UUID">'  + Arg + "</span>"; }
+        NameHTML(Arg)  { return '<span class="Name">'  + Arg + "</span>"; }
+        HndHTML(Arg)   { return '<span class="Hnd">'   + Arg + "</span>"; }
+        ValueHTML(Arg) { return '<span class="Value">' + Arg + "</span>"; }
 
         //
         // Directory list line
@@ -456,11 +515,13 @@ console.log(BLETree);
         ServerScan() {
             ServerCommand("ScanChars",this.Parent.Parent.Name,
                                       this.Parent.Name,
+                                      this.Dir.HStart,
+                                      this.Dir.HEnd,
                                       this.Name);
             }
 
         DataLine() {
-            return this.UUIDHTML(this.Name);
+            return this.UUIDHTML(this.Name) + ": " + this.NameHTML(this.Dir.GATTInfo.Name);
             }
         }
 
@@ -475,10 +536,17 @@ console.log(BLETree);
             }
 
         ServerScan() {
-            ServerCommand("GetValue",this.Parent.Parent.Parent.Name,
-                                     this.Parent.Parent.Name,
-                                     this.Parent.Name,
-                                     this.Name);
+            ServerCommand("GetBLECharValue",this.Parent.Parent.Parent.Name,
+                                            this.Parent.Parent.Name,
+                                            this.Dir.VHandle,
+                                            this.Parent.Name,
+                                            this.Name);
+            }
+
+        DataLine() {
+            return this.HndHTML(this.Name) + 
+                    " (" + this.UUIDHTML(this.Dir.Service) + ")" +
+                    ": " + this.NameHTML(this.Dir.GATTInfo.Name);
             }
         }
 
@@ -490,5 +558,9 @@ console.log(BLETree);
 
         constructor(Dir,Parent) {
             super("Val","V","Value",Dir,{},0,Parent);
+            }
+
+        DataLine() {
+            return 'Value: ' + this.ValueHTML(this.Dir.Value);
             }
         }
