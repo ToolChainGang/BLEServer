@@ -3,8 +3,8 @@
 ########################################################################################################################
 ########################################################################################################################
 ##
-##      Copyright (C) ACS corporation, PO Box 7521, Milford, NH 03055
-##      All Rights Reserved
+##      Copyright (C) 2020 Peter Walsh, Milford, NH 03055
+##      All Rights Reserved under the MIT license as outlined below.
 ##
 ##  FILE
 ##      04-UpgradePerl.sh
