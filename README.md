@@ -7,4 +7,5 @@ Much works, but it doesn't handle BLE errors gracefully (such as disconnect of w
 
 (For example, it allows the user to write a read-only characteristic, which causes an error. It doesn't crash, but you will need to reload the page.)
 
+
 aa
